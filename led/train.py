@@ -2,10 +2,13 @@ import datetime
 import logging
 import math
 import time
-import torch
+# import torch
+import mindspore as ms
+import mindspore.dataset as ds
 from os import path as osp
 
-from led.data import build_dataloader, build_dataset
+# from led.data import build_dataloader, build_dataset
+from led.data import build_dataloader, MyDataset
 from led.data.data_sampler import EnlargedSampler
 from led.data.prefetch_dataloader import CPUPrefetcher, CUDAPrefetcher
 from led.models import build_model
@@ -32,13 +35,25 @@ def create_train_val_dataloader(opt, logger):
     for phase, dataset_opt in opt['datasets'].items():
         if phase == 'train':
             dataset_enlarge_ratio = dataset_opt.get('dataset_enlarge_ratio', 1)
-            train_set = build_dataset(dataset_opt)
+            # train_set = build_dataset(dataset_opt)
+            train_set = ds.GeneratorDataset(
+                MyDataset(dataset_opt),
+                ['name', 'type']
+            )
+
+            if opt['dist']:  # distributed training
+                batch_size = dataset_opt['batch_size_per_gpu']
+            else:  # non-distributed training
+                multiplier = 1 if opt['num_gpu'] == 0 else opt['num_gpu']
+                batch_size = dataset_opt['batch_size_per_gpu'] * multiplier
+
+                train_set = train_set.batch(batch_size=batch_size, drop_remainder=True)
             train_sampler = EnlargedSampler(train_set, opt['world_size'], opt['rank'], dataset_enlarge_ratio)
             train_loader = build_dataloader(
                 train_set,
                 dataset_opt,
                 num_gpu=opt['num_gpu'],
-                dist=opt['dist'],
+                # dist=opt['dist'],
                 sampler=train_sampler,
                 seed=opt['manual_seed'])
 
@@ -54,9 +69,22 @@ def create_train_val_dataloader(opt, logger):
                         f'\n\tRequire iter number per epoch: {num_iter_per_epoch}'
                         f'\n\tTotal epochs: {total_epochs}; iters: {total_iters}.')
         elif phase.split('_')[0] == 'val':
-            val_set = build_dataset(dataset_opt)
+            # val_set = build_dataset(dataset_opt)
+            val_set = ds.GeneratorDataset(
+                MyDataset(dataset_opt),
+                ['name', 'type']
+            )
+            
+            batch_size = dataset_opt.get('batch_size_per_gpu', 1)
+
+            val_set = val_set.batch(batch_size=batch_size)
+
             val_loader = build_dataloader(
-                val_set, dataset_opt, num_gpu=opt['num_gpu'], dist=opt['dist'], sampler=None, seed=opt['manual_seed'])
+                val_set, dataset_opt, 
+                num_gpu=opt['num_gpu'], 
+                # dist=opt['dist'], 
+                sampler=None, 
+                seed=opt['manual_seed'])
             logger.info(f'Number of val images/folders in {dataset_opt["name"]}: {len(val_set)}')
             val_loaders.append(val_loader)
         else:
@@ -82,8 +110,10 @@ def load_resume_state(opt):
     if resume_state_path is None:
         resume_state = None
     else:
-        device_id = torch.cuda.current_device()
-        resume_state = torch.load(resume_state_path, map_location=lambda storage, loc: storage.cuda(device_id))
+        # device_id = torch.cuda.current_device()
+        device_target = ms.get_context("device_target")
+        # resume_state = torch.load(resume_state_path, map_location=lambda storage, loc: storage.cuda(device_id))
+        resume_state = ms.load_checkpoint(resume_state_path)
         check_resume(opt, resume_state['iter'])
     return resume_state
 
@@ -93,7 +123,8 @@ def train_pipeline(root_path):
     opt, args = parse_options(root_path, is_train=True)
     opt['root_path'] = root_path
 
-    torch.backends.cudnn.benchmark = True
+    # Reference: https://pytorch.org/docs/1.3.1/notes/randomness.html
+    # torch.backends.cudnn.benchmark = True
     # torch.backends.cudnn.deterministic = True
 
     # load resume states if necessary

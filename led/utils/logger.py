@@ -190,9 +190,9 @@ def get_env_info():
 
     Currently, only log the software version.
     """
-    import torch
-    import torchvision
-
+    # import torch
+    # import torchvision
+    import mindspore as ms
     from led.version import __version__
     msg = r"""
      ______                   __   __                 __      __
@@ -203,6 +203,8 @@ def get_env_info():
     """
     msg += ('\nVersion Information: '
             f'\n\tLED: {__version__}'
-            f'\n\tPyTorch: {torch.__version__}'
-            f'\n\tTorchVision: {torchvision.__version__}')
+            # f'\n\tPyTorch: {torch.__version__}'
+            # f'\n\tTorchVision: {torchvision.__version__}'
+            f'\n\tMindSpore: {ms.__version__}'
+            )
     return msg

@@ -1,9 +1,13 @@
 import math
-import torch
-from torch.utils.data.sampler import Sampler
-
-
-class EnlargedSampler(Sampler):
+# import torch
+import mindspore as ms
+# from torch.utils.data.sampler import Sampler
+import mindspore.dataset as ds
+from mindspore import ops
+import numpy as np
+# class EnlargedSampler(Sampler):
+# class EnlargedSampler(ds.Sampler): # 报错    if self.child_sampler is not None: AttributeError: 'EnlargedSampler' object has no attribute 'child_sampler'
+class EnlargedSampler():
     """Sampler that restricts data loading to a subset of the dataset.
 
     Modified from torch.utils.data.distributed.DistributedSampler
@@ -25,12 +29,16 @@ class EnlargedSampler(Sampler):
         self.epoch = 0
         self.num_samples = math.ceil(len(self.dataset) * ratio / self.num_replicas)
         self.total_size = self.num_samples * self.num_replicas
-
+        
     def __iter__(self):
         # deterministically shuffle based on epoch
-        g = torch.Generator()
-        g.manual_seed(self.epoch)
-        indices = torch.randperm(self.total_size, generator=g).tolist()
+        # g = torch.Generator()
+        # g.manual_seed(self.epoch)
+        # indices = torch.randperm(self.total_size, generator=g).tolist()
+        # indices = ops.randperm(self.total_size, seed=self.epoch).tolist() mindspore.ops.randperm 只支持CPU
+        
+        np.random.seed(self.epoch)
+        indices = np.random.permutation(self.total_size)
 
         dataset_size = len(self.dataset)
         indices = [v % dataset_size for v in indices]

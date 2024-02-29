@@ -15,7 +15,8 @@ class BaseModel():
 
     def __init__(self, opt):
         self.opt = opt
-        self.device = torch.device('cuda' if opt['num_gpu'] != 0 else 'cpu')
+        # self.device = torch.device('cuda' if opt['num_gpu'] != 0 else 'cpu')
+        self.device = 'GPU' if opt['num_gpu'] != 0 else 'CPU'
         self.is_train = opt['is_train']
         self.schedulers = []
         self.optimizers = []
@@ -91,7 +92,7 @@ class BaseModel():
         Args:
             net (nn.Module)
         """
-        net = net.to(self.device)
+        # net = net.to(self.device)
         if self.opt['dist']:
             find_unused_parameters = self.opt.get('find_unused_parameters', False)
             net = DistributedDataParallel(

@@ -1,14 +1,19 @@
 import math
-import torch
+# import torch
+import mindspore as ms
 from torch import autograd as autograd
-from torch import nn as nn
-from torch.nn import functional as F
+
+# from torch import nn as nn
+from mindspore import nn as nn
+# from torch.nn import functional as F
+from mindspore import ops as ops
 
 from led.utils.registry import LOSS_REGISTRY
 
 
 @LOSS_REGISTRY.register()
-class GANLoss(nn.Module):
+# class GANLoss(nn.Module):
+class GANLoss(nn.Cell):
     """Define GAN loss.
 
     Args:
@@ -67,8 +72,9 @@ class GANLoss(nn.Module):
         Returns:
             Tensor: wgan loss.
         """
-        return F.softplus(-input).mean() if target else F.softplus(input).mean()
-
+        # return F.softplus(-input).mean() if target else F.softplus(input).mean()
+        return ops.softplus(-input).mean() if target else ops.softplus(input).mean()
+        
     def get_target_label(self, input, target_is_real):
         """Get target label.
 
@@ -151,15 +157,23 @@ def r1_penalty(real_pred, real_img):
 
         Reference: Eq. 9 in Which training methods for GANs do actually converge.
         """
-    grad_real = autograd.grad(outputs=real_pred.sum(), inputs=real_img, create_graph=True)[0]
+    # grad_real = autograd.grad(outputs=real_pred.sum(), inputs=real_img, create_graph=True)[0]
+    grad_real = ms.grad(outputs=real_pred.sum(), inputs=real_img, create_graph=True)[0]
+
     grad_penalty = grad_real.pow(2).view(grad_real.shape[0], -1).sum(1).mean()
     return grad_penalty
 
 
 def g_path_regularize(fake_img, latents, mean_path_length, decay=0.01):
-    noise = torch.randn_like(fake_img) / math.sqrt(fake_img.shape[2] * fake_img.shape[3])
+    # noise = torch.randn_like(fake_img) / math.sqrt(fake_img.shape[2] * fake_img.shape[3])
+    noise = ops.randn_like(fake_img) / math.sqrt(fake_img.shape[2] * fake_img.shape[3])
+
+    # grad = autograd.grad(outputs=(fake_img * noise).sum(), inputs=latents, create_graph=True)[0]
     grad = autograd.grad(outputs=(fake_img * noise).sum(), inputs=latents, create_graph=True)[0]
-    path_lengths = torch.sqrt(grad.pow(2).sum(2).mean(1))
+
+    # path_lengths = torch.sqrt(grad.pow(2).sum(2).mean(1))
+    path_lengths = ops.sqrt(grad.pow(2).sum(2).mean(1))
+
 
     path_mean = mean_path_length + decay * (path_lengths.mean() - mean_path_length)
 
@@ -182,7 +196,9 @@ def gradient_penalty_loss(discriminator, real_data, fake_data, weight=None):
     """
 
     batch_size = real_data.size(0)
-    alpha = real_data.new_tensor(torch.rand(batch_size, 1, 1, 1))
+    # alpha = real_data.new_tensor(torch.rand(batch_size, 1, 1, 1))
+    alpha = real_data.new_tensor(ops.rand(batch_size, 1, 1, 1))
+
 
     # interpolate between real_data and fake_data
     interpolates = alpha * real_data + (1. - alpha) * fake_data
@@ -192,7 +208,8 @@ def gradient_penalty_loss(discriminator, real_data, fake_data, weight=None):
     gradients = autograd.grad(
         outputs=disc_interpolates,
         inputs=interpolates,
-        grad_outputs=torch.ones_like(disc_interpolates),
+        # grad_outputs=torch.ones_like(disc_interpolates),
+        grad_outputs=ops.ones_like(disc_interpolates),
         create_graph=True,
         retain_graph=True,
         only_inputs=True)[0]
@@ -202,6 +219,7 @@ def gradient_penalty_loss(discriminator, real_data, fake_data, weight=None):
 
     gradients_penalty = ((gradients.norm(2, dim=1) - 1)**2).mean()
     if weight is not None:
-        gradients_penalty /= torch.mean(weight)
+        # gradients_penalty /= torch.mean(weight)
+        gradients_penalty /= ops.mean(weight)
 
     return gradients_penalty

@@ -1,6 +1,7 @@
-from torch.utils import data as data
+# from torch.utils import data as data
 import numpy as np
-import torch
+# import torch
+import mindspore as ms 
 import glob
 from os import path as osp
 from tqdm import tqdm
@@ -9,7 +10,8 @@ from led.utils.registry import DATASET_REGISTRY
 from led.data.raw_utils import pack_raw_bayer
 
 @DATASET_REGISTRY.register()
-class RAWGTDataset(data.Dataset):
+# class RAWGTDataset(data.Dataset):
+class RAWGTDataset:
     def __init__(self, opt) -> None:
         super().__init__()
         self.opt = opt
@@ -60,18 +62,25 @@ class RAWGTDataset(data.Dataset):
             raise NotImplementedError
 
         if to_tensor:
-            im = torch.from_numpy(im).float().contiguous()
-            black_level = torch.from_numpy(black_level).float().contiguous()
-            white_level = torch.from_numpy(white_level).float().contiguous()
-            wb = torch.from_numpy(wb).float().contiguous()
-            ccm = torch.from_numpy(ccm).float().contiguous()
+            # im = torch.from_numpy(im).float().contiguous()
+            # black_level = torch.from_numpy(black_level).float().contiguous()
+            # white_level = torch.from_numpy(white_level).float().contiguous()
+            # wb = torch.from_numpy(wb).float().contiguous()
+            # ccm = torch.from_numpy(ccm).float().contiguous()
+            im = ms.Tensor.from_numpy(im).float().contiguous()
+            black_level = ms.Tensor.from_numpy(black_level).float().contiguous()
+            white_level = ms.Tensor.from_numpy(white_level).float().contiguous()
+            wb = ms.Tensor.from_numpy(wb).float().contiguous()
+            ccm = ms.Tensor.from_numpy(ccm).float().contiguous()
 
         return im, \
                black_level, white_level, \
                wb, ccm
 
     def randint(self, *range):
-        return torch.randint(*range, size=(1,)).item()
+        # return torch.randint(*range, size=(1,)).item()
+        return ms.ops.randint(*range, size=(1,)).item()
+
 
     def __getitem__(self, index):
         data_path = self.data_paths[index]

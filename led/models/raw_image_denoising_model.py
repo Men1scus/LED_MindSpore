@@ -225,7 +225,8 @@ class LEDFinetuneModel(RAWBaseModel):
 
         # define losses
         if train_opt.get('pixel_opt'):
-            self.cri_pix = build_loss(train_opt['pixel_opt']).to(self.device)
+            # self.cri_pix = build_loss(train_opt['pixel_opt']).to(self.device)
+            self.cri_pix = build_loss(train_opt['pixel_opt'])
         else:
             raise NotImplementedError()
 

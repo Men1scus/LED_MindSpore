@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
-import torch
-import torch.nn.functional as F
-
+# import torch
+import mindspore as ms
+# import torch.nn.functional as F
+import mindspore.ops as ops
 from led.metrics.metric_util import reorder_image, to_y_channel
 from led.utils.color_util import rgb2ycbcr_pt
 from led.utils.registry import METRIC_REGISTRY
@@ -74,12 +75,19 @@ def calculate_psnr_pt(img, img2, crop_border, test_y_channel=False, **kwargs):
         img = rgb2ycbcr_pt(img, y_only=True)
         img2 = rgb2ycbcr_pt(img2, y_only=True)
 
-    img = img.to(torch.float64)
-    img2 = img2.to(torch.float64)
+    # img = img.to(torch.float64)
+    img = img.to(ms.float64)
+        
+    # img2 = img2.to(torch.float64)
+    img2 = img2.to(ms.float64)
 
-    mse = torch.mean((img - img2)**2, dim=[1, 2, 3])
-    return 10. * torch.log10(1. / (mse + 1e-8))
+    # mse = torch.mean((img - img2)**2, dim=[1, 2, 3])
+    mse = ms.mean((img - img2)**2, dim=[1, 2, 3])
 
+    # return 10. * torch.log10(1. / (mse + 1e-8))
+    return 10. * ms.log10(1. / (mse + 1e-8))
+
+ 
 
 @METRIC_REGISTRY.register()
 def calculate_ssim(img, img2, crop_border, input_order='HWC', test_y_channel=False, **kwargs):
@@ -160,8 +168,11 @@ def calculate_ssim_pt(img, img2, crop_border, test_y_channel=False, **kwargs):
         img = rgb2ycbcr_pt(img, y_only=True)
         img2 = rgb2ycbcr_pt(img2, y_only=True)
 
-    img = img.to(torch.float64)
-    img2 = img2.to(torch.float64)
+    # img = img.to(torch.float64)
+    img = img.to(ms.float64)
+        
+    # img2 = img2.to(torch.float64)
+    img2 = img2.to(ms.float64)
 
     ssim = _ssim_pth(img * 255., img2 * 255.)
     return ssim
@@ -215,16 +226,22 @@ def _ssim_pth(img, img2):
 
     kernel = cv2.getGaussianKernel(11, 1.5)
     window = np.outer(kernel, kernel.transpose())
-    window = torch.from_numpy(window).view(1, 1, 11, 11).expand(img.size(1), 1, 11, 11).to(img.dtype).to(img.device)
+    # window = torch.from_numpy(window).view(1, 1, 11, 11).expand(img.size(1), 1, 11, 11).to(img.dtype).to(img.device)
+    window = ms.Tensor.from_numpy(window).view(1, 1, 11, 11).expand(img.size(1), 1, 11, 11).to(img.dtype).to(img.device)
 
     mu1 = F.conv2d(img, window, stride=1, padding=0, groups=img.shape[1])  # valid mode
     mu2 = F.conv2d(img2, window, stride=1, padding=0, groups=img2.shape[1])  # valid mode
     mu1_sq = mu1.pow(2)
     mu2_sq = mu2.pow(2)
     mu1_mu2 = mu1 * mu2
-    sigma1_sq = F.conv2d(img * img, window, stride=1, padding=0, groups=img.shape[1]) - mu1_sq
-    sigma2_sq = F.conv2d(img2 * img2, window, stride=1, padding=0, groups=img.shape[1]) - mu2_sq
-    sigma12 = F.conv2d(img * img2, window, stride=1, padding=0, groups=img.shape[1]) - mu1_mu2
+    # sigma1_sq = F.conv2d(img * img, window, stride=1, padding=0, groups=img.shape[1]) - mu1_sq
+    sigma1_sq = ops.conv2d(img * img, window, stride=1, padding=0, groups=img.shape[1]) - mu1_sq
+
+    # sigma2_sq = F.conv2d(img2 * img2, window, stride=1, padding=0, groups=img.shape[1]) - mu2_sq
+    sigma2_sq = ops.conv2d(img2 * img2, window, stride=1, padding=0, groups=img.shape[1]) - mu2_sq
+
+    # sigma12 = F.conv2d(img * img2, window, stride=1, padding=0, groups=img.shape[1]) - mu1_mu2
+    sigma12 = ops.conv2d(img * img2, window, stride=1, padding=0, groups=img.shape[1]) - mu1_mu2
 
     cs_map = (2 * sigma12 + c2) / (sigma1_sq + sigma2_sq + c2)
     ssim_map = ((2 * mu1_mu2 + c1) / (mu1_sq + mu2_sq + c1)) * cs_map

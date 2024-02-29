@@ -1,8 +1,9 @@
 import queue as Queue
 import threading
-import torch
-from torch.utils.data import DataLoader
-
+# import torch
+import mindspore as ms 
+# from torch.utils.data import DataLoader
+from mindspore.dataset import GeneratorDataset
 
 class PrefetchGenerator(threading.Thread):
     """A general prefetch generator.
@@ -36,7 +37,8 @@ class PrefetchGenerator(threading.Thread):
         return self
 
 
-class PrefetchDataLoader(DataLoader):
+# class PrefetchDataLoader(DataLoader):
+class PrefetchDataLoader(GeneratorDataset):
     """Prefetch version of dataloader.
 
     Reference: https://github.com/IgorSusmelj/pytorch-styleguide/issues/5#
@@ -95,8 +97,10 @@ class CUDAPrefetcher():
         self.ori_loader = loader
         self.loader = iter(loader)
         self.opt = opt
-        self.stream = torch.cuda.Stream()
-        self.device = torch.device('cuda' if opt['num_gpu'] != 0 else 'cpu')
+        # self.stream = torch.cuda.Stream()
+        # self.device = torch.device('cuda' if opt['num_gpu'] != 0 else 'cpu')
+        self.device = 'GPU' if opt['num_gpu'] != 0 else 'CPU'
+        ms.set_context(device_target=self.device)
         self.preload()
 
     def preload(self):
@@ -106,13 +110,14 @@ class CUDAPrefetcher():
             self.batch = None
             return None
         # put tensors to gpu
-        with torch.cuda.stream(self.stream):
-            for k, v in self.batch.items():
-                if torch.is_tensor(v):
-                    self.batch[k] = self.batch[k].to(device=self.device, non_blocking=True)
+        # with torch.cuda.stream(self.stream):
+        for k, v in self.batch.items():
+            # if torch.is_tensor(v):
+            if ms.ops.is_tensor(v):
+                self.batch[k] = self.batch[k].to(device=self.device, non_blocking=True)
 
     def next(self):
-        torch.cuda.current_stream().wait_stream(self.stream)
+        # torch.cuda.current_stream().wait_stream(self.stream)
         batch = self.batch
         self.preload()
         return batch

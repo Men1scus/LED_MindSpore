@@ -1,7 +1,10 @@
 import re
-from torch.utils import data as data
+# from torch.utils import data as data
+import mindspore.dataset as ds
 import numpy as np
-import torch
+# import torch
+import mindspore as ms
+from mindspore import ops as ops
 from os import path as osp
 from tqdm import tqdm
 
@@ -10,7 +13,8 @@ from led.data.raw_utils import pack_raw_bayer
 
 
 @DATASET_REGISTRY.register()
-class PairedRAWDataset(data.Dataset):
+# class PairedRAWDataset(data.Dataset):
+class PairedRAWDataset:
     def __init__(self, opt) -> None:
         super().__init__()
         self.opt = opt
@@ -99,11 +103,17 @@ class PairedRAWDataset(data.Dataset):
             raise NotImplementedError
 
         if to_tensor:
-            im = torch.from_numpy(im).float().contiguous()
-            black_level = torch.from_numpy(black_level).float().contiguous()
-            white_level = torch.from_numpy(white_level).float().contiguous()
-            wb = torch.from_numpy(wb).float().contiguous()
-            ccm = torch.from_numpy(ccm).float().contiguous()
+            # im = torch.from_numpy(im).float().contiguous()
+            # black_level = torch.from_numpy(black_level).float().contiguous()
+            # white_level = torch.from_numpy(white_level).float().contiguous()
+            # wb = torch.from_numpy(wb).float().contiguous()
+            # ccm = torch.from_numpy(ccm).float().contiguous()
+            
+            im = ms.Tensor.from_numpy(im).float().contiguous()
+            black_level = ms.Tensor.from_numpy(black_level).float().contiguous()
+            white_level = ms.Tensor.from_numpy(white_level).float().contiguous()
+            wb = ms.Tensor.from_numpy(wb).float().contiguous()
+            ccm = ms.Tensor.from_numpy(ccm).float().contiguous()
 
         return (im - black_level) / (white_level - black_level), \
                 wb, ccm
@@ -131,8 +141,10 @@ class PairedRAWDataset(data.Dataset):
             crop_size = self.opt['crop_size']
             assert crop_size <= H and crop_size <= W
             if self.opt['phase'] == 'train':
-                h_start = torch.randint(0, H - crop_size, (1,)).item()
-                w_start = torch.randint(0, W - crop_size, (1,)).item()
+                # h_start = torch.randint(0, H - crop_size, (1,)).item()
+                # w_start = torch.randint(0, W - crop_size, (1,)).item()
+                h_start = ops.randint(0, H - crop_size, (1,)).item()
+                w_start = ops.randint(0, W - crop_size, (1,)).item()
             else:
                 # center crop
                 h_start = (H - crop_size) // 2
@@ -144,33 +156,52 @@ class PairedRAWDataset(data.Dataset):
             gt_im_patch = gt_im
         ## flip + rotate
         if self.opt['phase'] == 'train':
-            hflip = self.opt['use_hflip'] and torch.rand((1,)).item() < 0.5
-            vflip = self.opt['use_rot'] and torch.rand((1,)).item() < 0.5
-            rot90 = self.opt['use_rot'] and torch.rand((1,)).item() < 0.5
+            # hflip = self.opt['use_hflip'] and torch.rand((1,)).item() < 0.5
+            # vflip = self.opt['use_rot'] and torch.rand((1,)).item() < 0.5
+            # rot90 = self.opt['use_rot'] and torch.rand((1,)).item() < 0.5
+            hflip = self.opt['use_hflip'] and ops.rand((1,)).item() < 0.5
+            vflip = self.opt['use_rot'] and ops.rand((1,)).item() < 0.5
+            rot90 = self.opt['use_rot'] and ops.rand((1,)).item() < 0.5
+            # if hflip:
+            #     lq_im_patch = torch.flip(lq_im_patch, (2,))
+            #     gt_im_patch = torch.flip(gt_im_patch, (2,))
+            # if vflip:
+            #     lq_im_patch = torch.flip(lq_im_patch, (1,))
+            #     gt_im_patch = torch.flip(gt_im_patch, (1,))
+            # if rot90:
+            #     lq_im_patch = torch.permute(lq_im_patch, (0, 2, 1))
+            #     gt_im_patch = torch.permute(gt_im_patch, (0, 2, 1))
+
             if hflip:
-                lq_im_patch = torch.flip(lq_im_patch, (2,))
-                gt_im_patch = torch.flip(gt_im_patch, (2,))
+                lq_im_patch = ops.flip(lq_im_patch, (2,))
+                gt_im_patch = ops.flip(gt_im_patch, (2,))
             if vflip:
-                lq_im_patch = torch.flip(lq_im_patch, (1,))
-                gt_im_patch = torch.flip(gt_im_patch, (1,))
+                lq_im_patch = ops.flip(lq_im_patch, (1,))
+                gt_im_patch = ops.flip(gt_im_patch, (1,))
             if rot90:
-                lq_im_patch = torch.permute(lq_im_patch, (0, 2, 1))
-                gt_im_patch = torch.permute(gt_im_patch, (0, 2, 1))
+                lq_im_patch = ops.permute(lq_im_patch, (0, 2, 1))
+                gt_im_patch = ops.permute(gt_im_patch, (0, 2, 1))
+
 
             if self.opt.get('ratio_aug') is not None:
                 ratio_range = self.opt['ratio_aug']
-                rand_ratio = torch.rand((1,)).item() * (ratio_range[1] - ratio_range[0]) + ratio_range[0]
+                # rand_ratio = torch.rand((1,)).item() * (ratio_range[1] - ratio_range[0]) + ratio_range[0]
+                rand_ratio = ops.rand((1,)).item() * (ratio_range[1] - ratio_range[0]) + ratio_range[0]
                 ## TODO: maybe there are some over-exposed?
                 gt_im_patch = gt_im_patch / ratio * rand_ratio
                 ratio = rand_ratio
 
-        lq_im_patch = torch.clip(lq_im_patch * ratio, self.zero_clip, 1)
-        gt_im_patch = torch.clip(gt_im_patch, 0, 1)
+        # lq_im_patch = torch.clip(lq_im_patch * ratio, self.zero_clip, 1)
+        # gt_im_patch = torch.clip(gt_im_patch, 0, 1)
+                
+        lq_im_patch = ops.clip(lq_im_patch * ratio, self.zero_clip, 1)
+        gt_im_patch = ops.clip(gt_im_patch, 0, 1)
 
         return {
             'lq': lq_im_patch,
             'gt': gt_im_patch,
-            'ratio': torch.tensor(ratio).float(),
+            # 'ratio': torch.tensor(ratio).float(),
+            'ratio': ms.Tensor(ratio).float(),
             'wb': gt_wb if self.which_meta == 'gt' else lq_wb,
             'ccm': gt_ccm if self.which_meta == 'gt' else lq_ccm,
             'lq_path': lq_path,

@@ -1,7 +1,8 @@
 import functools
-import torch
-from torch.nn import functional as F
-
+# import torch
+import mindspore as ms
+# from torch.nn import functional as F
+from mindspore import ops as ops
 
 def reduce_loss(loss, reduction):
     """Reduce loss as specified.
@@ -13,7 +14,8 @@ def reduce_loss(loss, reduction):
     Returns:
         Tensor: Reduced loss tensor.
     """
-    reduction_enum = F._Reduction.get_enum(reduction)
+
+    reduction_enum = ops._Reduction.get_enum(reduction)
     # none: 0, elementwise_mean:1, sum: 2
     if reduction_enum == 0:
         return loss
@@ -110,13 +112,18 @@ def get_local_weights(residual, ksize):
     """
 
     pad = (ksize - 1) // 2
-    residual_pad = F.pad(residual, pad=[pad, pad, pad, pad], mode='reflect')
+    # residual_pad = F.pad(residual, pad=[pad, pad, pad, pad], mode='reflect')
+    residual_pad = ops.pad(input_x=residual, padding=[pad, pad, pad, pad], mode='reflect') 
+    # 前2个参数名不同，第3，4个参数略有不同，但不影响
 
     unfolded_residual = residual_pad.unfold(2, ksize, 1).unfold(3, ksize, 1)
-    pixel_level_weight = torch.var(unfolded_residual, dim=(-1, -2), unbiased=True, keepdim=True).squeeze(-1).squeeze(-1)
+    # pixel_level_weight = torch.var(unfolded_residual, dim=(-1, -2), unbiased=True, keepdim=True).squeeze(-1).squeeze(-1)
+    pixel_level_weight = ops.var(unfolded_residual, axis=(-1, -2), ddof=True, keepdims=True).squeeze(-1).squeeze(-1) 
+    # 第2，3，4个参数名不同, 且没有torch的第5个参数，
+    # squeeze 参数名不一致，但不影响
 
     return pixel_level_weight
-
+   
 
 def get_refined_artifact_map(img_gt, img_output, img_ema, ksize):
     """Calculate the artifact map of LDL
@@ -133,10 +140,15 @@ def get_refined_artifact_map(img_gt, img_output, img_ema, ksize):
         (calculated based on both local and global observations).
     """
 
-    residual_ema = torch.sum(torch.abs(img_gt - img_ema), 1, keepdim=True)
-    residual_sr = torch.sum(torch.abs(img_gt - img_output), 1, keepdim=True)
+    # residual_ema = torch.sum(torch.abs(img_gt - img_ema), 1, keepdim=True)
+    residual_ema = ops.sum(ops.abs(img_gt - img_ema), 1, keepdim=True)
 
-    patch_level_weight = torch.var(residual_sr.clone(), dim=(-1, -2, -3), keepdim=True)**(1 / 5)
+    # residual_sr = torch.sum(torch.abs(img_gt - img_output), 1, keepdim=True)
+    residual_sr = ops.sum(ops.abs(img_gt - img_output), 1, keepdim=True)
+
+    # patch_level_weight = torch.var(residual_sr.clone(), dim=(-1, -2, -3), keepdim=True)**(1 / 5)
+    patch_level_weight = ops.var(input=residual_sr.clone(), axis=(-1, -2, -3), keepdims=True)**(1 / 5)
+    
     pixel_level_weight = get_local_weights(residual_sr.clone(), ksize)
     overall_weight = patch_level_weight * pixel_level_weight
 

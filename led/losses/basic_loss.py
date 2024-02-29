@@ -1,6 +1,11 @@
-import torch
-from torch import nn as nn
-from torch.nn import functional as F
+# import torch
+import mindspore as ms
+# from torch import nn as nn
+from mindspore import nn as nn
+# from torch.nn import functional as F
+import mindspore.ops as ops
+
+
 
 from led.utils.registry import LOSS_REGISTRY
 from .loss_util import weighted_loss
@@ -10,21 +15,24 @@ _reduction_modes = ['none', 'mean', 'sum']
 
 @weighted_loss
 def l1_loss(pred, target):
-    return F.l1_loss(pred, target, reduction='none')
+    # return F.l1_loss(pred, target, reduction='none')
+    return ops.l1_loss(pred, target, reduction='none')
 
 
 @weighted_loss
 def mse_loss(pred, target):
-    return F.mse_loss(pred, target, reduction='none')
+    # return F.mse_loss(pred, target, reduction='none')
+    return ops.mse_loss(pred, target, reduction='none')
 
 
 @weighted_loss
 def charbonnier_loss(pred, target, eps=1e-12):
-    return torch.sqrt((pred - target)**2 + eps)
+    return ms.ops.sqrt((pred - target)**2 + eps)
 
 
 @LOSS_REGISTRY.register()
-class L1Loss(nn.Module):
+# class L1Loss(nn.Module):
+class L1Loss(nn.Cell):
     """L1 (mean absolute error, MAE) loss.
 
     Args:
@@ -52,7 +60,8 @@ class L1Loss(nn.Module):
 
 
 @LOSS_REGISTRY.register()
-class MSELoss(nn.Module):
+# class MSELoss(nn.Module):
+class MSELoss(nn.Cell):
     """MSE (L2) loss.
 
     Args:
