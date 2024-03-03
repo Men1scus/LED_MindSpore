@@ -1,7 +1,9 @@
 
 from collections import OrderedDict
 from os import path as osp
-import torch
+# import torch
+import mindspore as ms
+from mindspore import ops
 from tqdm import tqdm
 from led.metrics import calculate_metric
 
@@ -50,16 +52,16 @@ class RAWBaseModel(BaseModel):
     def test(self):
         if hasattr(self, 'net_g_ema'):
             self.net_g_ema.eval()
-            with torch.no_grad():
-                self.output = self.net_g_ema(self.lq)
-                if self.corrector is not None:
-                    self.output = self.corrector(self.output, self.gt)
+            # with torch.no_grad():
+            self.output = self.net_g_ema(self.lq)
+            if self.corrector is not None:
+                self.output = self.corrector(self.output, self.gt)
         else:
             self.net_g.eval()
-            with torch.no_grad():
-                self.output = self.net_g(self.lq)
-                if self.corrector is not None:
-                    self.output = self.corrector(self.output, self.gt)
+            # with torch.no_grad():
+            self.output = self.net_g(self.lq)
+            if self.corrector is not None:
+                self.output = self.corrector(self.output, self.gt)
             self.net_g.train()
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img):
@@ -67,7 +69,9 @@ class RAWBaseModel(BaseModel):
             self.nondist_validation(dataloader, current_iter, tb_logger, save_img)
 
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img):
+        # dataset_name = dataloader.dataset.opt['name']
         dataset_name = dataloader.dataset.opt['name']
+
         with_metrics = self.opt['val'].get('metrics') is not None
         use_pbar = self.opt['val'].get('pbar', True)
 
@@ -114,7 +118,7 @@ class RAWBaseModel(BaseModel):
             del self.output
             del self.ccm
             del self.wb
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
             if save_img:
                 if not self.calculate_metric_in_batch:
@@ -158,7 +162,9 @@ class RAWBaseModel(BaseModel):
                         opt_['type'] = opt_['type'] + '_pt'
                     metric = calculate_metric(metric_data, opt_)
                     if self.calculate_metric_in_batch:
-                        metric = torch.sum(metric)
+                        # metric = torch.sum(metric)
+                        metric = ops.sum(metric)
+
                     self.metric_results[name] += metric
             if use_pbar:
                 pbar.update(1)

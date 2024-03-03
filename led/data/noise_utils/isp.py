@@ -1,6 +1,7 @@
-import torch
-
-
+# import torch
+import mindspore as ms
+from mindspore import ops as ops
+from mindspore.scipy.linalg import inv
 def random_ccm(batch_size, device='cuda'):
     """Generates random RGB -> Camera color correction matrices."""
     # Takes a random convex combination of XYZ -> Camera CCMs.
@@ -17,37 +18,53 @@ def random_ccm(batch_size, device='cuda'):
                 [-0.4782, 1.3016, 0.1933],
                 [-0.097, 0.1581, 0.5181]]]
     num_ccms = len(xyz2cams)
-    xyz2cams = torch.tensor(xyz2cams, device=device).unsqueeze(0)
-    weights = torch.rand((batch_size, num_ccms, 1, 1), device=device) * 1e8 + 1e-8
-    weights_sum = torch.sum(weights, dim=1)
-    xyz2cam = torch.sum(xyz2cams * weights, dim=1) / weights_sum
+    # xyz2cams = torch.tensor(xyz2cams, device=device).unsqueeze(0)
+    # weights = torch.rand((batch_size, num_ccms, 1, 1), device=device) * 1e8 + 1e-8
+    # weights_sum = torch.sum(weights, dim=1)
+    # xyz2cam = torch.sum(xyz2cams * weights, dim=1) / weights_sum
+    xyz2cams = ms.tensor(xyz2cams).unsqueeze(0)
+    weights = ops.rand((batch_size, num_ccms, 1, 1)) * 1e8 + 1e-8
+    weights_sum = ops.sum(weights, dim=1)
+    xyz2cam = ops.sum(xyz2cams * weights, dim=1) / weights_sum
 
     # Multiplies with RGB -> XYZ to get RGB -> Camera CCM.
-    rgb2xyz = torch.tensor([[0.4124564, 0.3575761, 0.1804375],
+    # rgb2xyz = torch.tensor([[0.4124564, 0.3575761, 0.1804375],
+    #                         [0.2126729, 0.7151522, 0.0721750],
+    #                         [0.0193339, 0.1191920, 0.9503041]], device=device)
+    rgb2xyz = ms.tensor([[0.4124564, 0.3575761, 0.1804375],
                             [0.2126729, 0.7151522, 0.0721750],
-                            [0.0193339, 0.1191920, 0.9503041]], device=device)
+                            [0.0193339, 0.1191920, 0.9503041]])
     rgb2cam = xyz2cam @ rgb2xyz
 
     # Normalizes each row.
-    rgb2cam = rgb2cam / torch.sum(rgb2cam, dim=-1, keepdims=True)
+    # rgb2cam = rgb2cam / torch.sum(rgb2cam, dim=-1, keepdims=True)
+    rgb2cam = rgb2cam / ops.sum(rgb2cam, dim=-1, keepdims=True)
     return rgb2cam
 
 
 def random_gain(batch_size, device='cuda'):
     """Generates random gains for brightening and white balance."""
     # RGB gain represents brightening.
-    rgb_gain = 1.0 / (torch.randn((batch_size), device=device) * 0.1 + 0.8)
+    # rgb_gain = 1.0 / (torch.randn((batch_size), device=device) * 0.1 + 0.8)
+
+    # # Red and blue gains represent white balance.
+    # red_gain = torch.rand((batch_size), device=device) * (2.4 - 1.9) + 1.9
+    # blue_gain = torch.rand((batch_size), device=device) * (1.9 - 1.5) + 1.5
+
+    rgb_gain = 1.0 / (ops.randn((batch_size), device=device) * 0.1 + 0.8)
 
     # Red and blue gains represent white balance.
-    red_gain = torch.rand((batch_size), device=device) * (2.4 - 1.9) + 1.9
-    blue_gain = torch.rand((batch_size), device=device) * (1.9 - 1.5) + 1.5
+    red_gain = ops.rand((batch_size), device=device) * (2.4 - 1.9) + 1.9
+    blue_gain = ops.rand((batch_size), device=device) * (1.9 - 1.5) + 1.5
+
     return rgb_gain, red_gain, blue_gain
 
 
 def inverse_smoothstep(image):
     """Approximately inverts a global tone mapping curve."""
     image = image.clamp(0, 1)
-    return 0.5 - torch.sin(torch.asin(1.0 - 2.0 * image) / 3.0)
+    # return 0.5 - torch.sin(torch.asin(1.0 - 2.0 * image) / 3.0)
+    return 0.5 - ops.sin(ops.asin(1.0 - 2.0 * image) / 3.0)
 
 
 def smoothstep(image):
@@ -58,13 +75,15 @@ def smoothstep(image):
 def gamma_expansion(image):
     """Converts from gamma to linear space."""
     # Clamps to prevent numerical instability of gradients near zero.
-    return torch.maximum(image, torch.tensor(1e-8, device=image.device)) ** 2.2
+    # return torch.maximum(image, torch.tensor(1e-8, device=image.device)) ** 2.2
+    return ops.maximum(image, ms.tensor(1e-8)) ** 2.2
 
 
 def gamma_compression(image, gamma=2.2):
     """Converts from linear to gamma space."""
     # Clamps to prevent numerical instability of gradients near zero.
-    return torch.maximum(image, torch.tensor(1e-8, device=image.device)) ** (1.0 / gamma)
+    # return torch.maximum(image, torch.tensor(1e-8, device=image.device)) ** (1.0 / gamma)
+    return ops.maximum(image, ms.tensor(1e-8)) ** (1.0 / gamma)
 
 
 def apply_ccm(image, ccm):
@@ -85,12 +104,17 @@ def apply_gains(bayer_images, rgb_gains, red_gains, blue_gains, in_type='rgbg'):
     rgb_gains =  rgb_gains.reshape(-1, *tail)
     red_gains =  red_gains.reshape(-1, *tail)
     blue_gains = blue_gains.reshape(-1, *tail)
-    green_gains = torch.ones_like(rgb_gains)
+    # green_gains = torch.ones_like(rgb_gains)
+    green_gains = ops.ones_like(rgb_gains)
 
+    # if in_type == 'rggb':
+    #     gains = torch.cat([red_gains, green_gains, green_gains, blue_gains], dim=-3) * rgb_gains
+    # elif in_type == 'rgbg':
+    #     gains = torch.cat([red_gains, green_gains, blue_gains, green_gains], dim=-3) * rgb_gains
     if in_type == 'rggb':
-        gains = torch.cat([red_gains, green_gains, green_gains, blue_gains], dim=-3) * rgb_gains
+        gains = ops.cat([red_gains, green_gains, green_gains, blue_gains], axis=-3) * rgb_gains
     elif in_type == 'rgbg':
-        gains = torch.cat([red_gains, green_gains, blue_gains, green_gains], dim=-3) * rgb_gains
+        gains = ops.cat([red_gains, green_gains, blue_gains, green_gains], axis=-3) * rgb_gains
     return bayer_images * gains
 
 
@@ -101,15 +125,23 @@ def safe_invert_gains(image, rgb_gain, red_gain, blue_gain):
     red_gain =  red_gain.reshape(-1, *tail)
     blue_gain = blue_gain.reshape(-1, *tail)
 
-    gains = torch.cat([
-        1.0 / red_gain, torch.ones_like(rgb_gain), 1.0 / blue_gain
-    ], dim=-3) / rgb_gain
+    # gains = torch.cat([
+    #     1.0 / red_gain, torch.ones_like(rgb_gain), 1.0 / blue_gain
+    # ], dim=-3) / rgb_gain
+    gains = ops.cat([
+        1.0 / red_gain, ops.ones_like(rgb_gain), 1.0 / blue_gain
+    ], axis=-3) / rgb_gain
 
     # Prevents dimming of saturated pixels by smoothly masking gains near white.
-    gray = torch.mean(image, dim=-3, keepdims=True)
+    # gray = torch.mean(image, dim=-3, keepdims=True)
+    gray = ops.mean(image, axis=-3, keepdims=True)
     inflection = 0.9
-    mask = (torch.maximum(gray - inflection, torch.tensor(0.0, device=gray.device)) / (1.0 - inflection)) ** 2.0
-    safe_gains = torch.maximum(mask + (1.0 - mask) * gains, gains)
+    # mask = (torch.maximum(gray - inflection, torch.tensor(0.0, device=gray.device)) / (1.0 - inflection)) ** 2.0
+    mask = (ops.maximum(gray - inflection, ms.tensor(0.0, device=gray.device)) / (1.0 - inflection)) ** 2.0
+
+    # safe_gains = torch.maximum(mask + (1.0 - mask) * gains, gains)
+    safe_gains = ops.maximum(mask + (1.0 - mask) * gains, gains)
+
     return image * safe_gains
 
 
@@ -120,9 +152,12 @@ def invert_gains(image, rgb_gain, red_gain, blue_gain):
     red_gain =  red_gain.reshape(-1, *tail)
     blue_gain = blue_gain.reshape(-1, *tail)
 
-    gains = torch.cat([
-        1.0 / red_gain, torch.ones_like(rgb_gain), 1.0 / blue_gain
-    ], dim=-3) / rgb_gain
+    # gains = torch.cat([
+    #     1.0 / red_gain, torch.ones_like(rgb_gain), 1.0 / blue_gain
+    # ], dim=-3) / rgb_gain
+    gains = ops.cat([
+        1.0 / red_gain, ops.ones_like(rgb_gain), 1.0 / blue_gain
+    ], axis=-3) / rgb_gain
     return image * gains
 
 
@@ -134,9 +169,12 @@ def mosaic(image, out_type):
     gb = image[..., 1:2, 1::2, ::2]
     b = image[..., 2:3, 1::2, 1::2]
     if out_type == 'rgbg':
-        out = torch.cat([r, gr, b, gb], dim=-3)
+        # out = torch.cat([r, gr, b, gb], dim=-3)
+        out = ops.cat([r, gr, b, gb], axis=-3)
     elif out_type == 'rggb':
-        out = torch.cat([r, gr, gb, b], dim=-3)
+        # out = torch.cat([r, gr, gb, b], dim=-3)
+        out = ops.cat([r, gr, gb, b], axis=-3)
+
     return out
 
 
@@ -150,27 +188,33 @@ def half_size_demosaic(bayer_images, in_type):
         b = bayer_images[..., 2:3, :, :]
         gb = bayer_images[..., 3:4, :, :]
     g = (gr + gb) / 2
-    linear_rgb = torch.cat([r, g, b], dim=-3)
+    # linear_rgb = torch.cat([r, g, b], dim=-3)
+    linear_rgb = ops.cat([r, g, b], dim=-3)
     return linear_rgb
 
 
 def demosaic(bayer_images, in_type='rgbg'):
     """Bilinearly demosaics a batch of RGGB Bayer images."""
     def bilinear_interpolate(x, shape):
-        return torch.nn.functional.interpolate(x, shape, mode='bilinear')
-
+        # return torch.nn.functional.interpolate(x, shape, mode='bilinear')
+        return ops.interpolate(x, shape, mode='bilinear')
+    
     def space_to_depth(x, downscale_factor):
-        return torch.nn.functional.pixel_unshuffle(x, downscale_factor)
+        # return torch.nn.functional.pixel_unshuffle(x, downscale_factor)
+        return ops.pixel_unshuffle(x, downscale_factor)
 
     def depth_to_space(x, upscale_factor):
-        return torch.nn.functional.pixel_shuffle(x, upscale_factor)
+        # return torch.nn.functional.pixel_shuffle(x, upscale_factor)
+        return ops.pixel_shuffle(x, upscale_factor)
 
     # This implementation exploits how edges are aligned when upsampling with
     # torch.nn.functional.interpolate.
 
     if bayer_images.dim() == 5:
         B, T, C, H, W = bayer_images.shape
-        bayer_images = torch.reshape(bayer_images, (B * T, C, H, W))
+        # bayer_images = torch.reshape(bayer_images, (B * T, C, H, W))
+        bayer_images = ops.reshape(bayer_images, (B * T, C, H, W))
+
     elif bayer_images.dim() == 4:
         B, C, H, W = bayer_images.shape
         T = None
@@ -188,14 +232,22 @@ def demosaic(bayer_images, in_type='rgbg'):
 
     red = bilinear_interpolate(red, shape)
 
-    green_red = torch.fliplr(green_red)
+    # green_red = torch.fliplr(green_red)
+    green_red = ops.fliplr(green_red)
+
     green_red = bilinear_interpolate(green_red, shape)
-    green_red = torch.fliplr(green_red)
+    # green_red = torch.fliplr(green_red)
+    green_red = ops.fliplr(green_red)
+
     green_red = space_to_depth(green_red, 2)
 
-    green_blue = torch.flipud(green_blue)
+    # green_blue = torch.flipud(green_blue)
+    green_blue = ops.flipud(green_blue)
     green_blue = bilinear_interpolate(green_blue, shape)
-    green_blue = torch.flipud(green_blue)
+
+    # green_blue = torch.flipud(green_blue)
+    green_blue = ops.flipud(green_blue)
+
     green_blue = space_to_depth(green_blue, 2)
 
     green_at_red = (green_red[:, 0] + green_blue[:, 0]) / 2
@@ -205,13 +257,21 @@ def demosaic(bayer_images, in_type='rgbg'):
     green_planes = [
         green_at_red, green_at_green_red, green_at_green_blue, green_at_blue
     ]
-    green = depth_to_space(torch.stack(green_planes, dim=1), 2)
+    # green = depth_to_space(torch.stack(green_planes, dim=1), 2)
 
-    blue = torch.flipud(torch.fliplr(blue))
+    # blue = torch.flipud(torch.fliplr(blue))
+    # blue = bilinear_interpolate(blue, shape)
+    # blue = torch.flipud(torch.fliplr(blue))
+
+    # rgb_images = torch.cat([red, green, blue], dim=1)
+
+    green = depth_to_space(ops.stack(green_planes, axis=1), 2)
+
+    blue = ops.flipud(ops.fliplr(blue))
     blue = bilinear_interpolate(blue, shape)
-    blue = torch.flipud(torch.fliplr(blue))
+    blue = ops.flipud(ops.fliplr(blue))
 
-    rgb_images = torch.cat([red, green, blue], dim=1)
+    rgb_images = ops.cat([red, green, blue], axis=1)
     if T is not None:
         rgb_images = rgb_images.reshape(B, T, 3, H * 2, W * 2)
     return rgb_images
@@ -238,7 +298,9 @@ def reverse_isp(srgb, ccm, gains, scale, out_type='rgbg', safe_invert_gain=False
     # Inverts gamma compression.
     linear_rgb = gamma_expansion(srgb)
     # Inverts color correction.
-    ccm_inv = torch.linalg.inv(ccm)
+    # ccm_inv = torch.linalg.inv(ccm)
+    ccm_inv = inv(ccm)
+    
     linear_rgb = apply_ccm(linear_rgb, ccm_inv)
     # Approximately inverts white balance and brightening.
     rgb_gain, red_gain, blue_gain = gains
@@ -247,7 +309,9 @@ def reverse_isp(srgb, ccm, gains, scale, out_type='rgbg', safe_invert_gain=False
     else:
         linear_rgb = invert_gains(linear_rgb, rgb_gain, red_gain, blue_gain)
     # Clips saturated pixels.
-    linear_rgb = torch.clamp(linear_rgb, 0.0, 1.0)
+    # linear_rgb = torch.clamp(linear_rgb, 0.0, 1.0)
+    linear_rgb = ops.clamp(linear_rgb, 0.0, 1.0)
+        
     # Applies a Bayer mosaic.
     out = mosaic(linear_rgb, out_type)
 

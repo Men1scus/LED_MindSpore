@@ -2,9 +2,10 @@ import importlib
 import numpy as np
 import random
 # import torch
-import mindspore as ms
 # import torch.utils.data
-import mindspore.dataset as ds
+import mindspore as ms
+from mindspore import dataset as ds
+
 from copy import deepcopy
 from functools import partial
 from os import path as osp
@@ -38,32 +39,6 @@ def build_dataset(dataset_opt):
     logger.info(f'Dataset [{dataset.__class__.__name__}] - {dataset_opt["name"]} is built.')
     return dataset
 
-class MyDataset:
-    """Self-defined dataset with configurable parameters.
-    
-    Args:
-        n (int): Number of samples in the dataset.
-        shape (tuple): Shape of the data samples. Default is (3, 4, 5).
-        label_shape (tuple): Shape of the labels. Default is (1,).
-    """
-     
-    def __init__(self, dataset_opt):
-        dataset_opt = deepcopy(dataset_opt)
-        self.data_pair_list = dataset_opt['data_pair_list']
-        self.dataset = build_dataset(dataset_opt)
-        print('---------------------', self.data_pair_list)
-        
-    def __getitem__(self, index):
-        # dataset_opt = deepcopy(dataset_opt)
-        # dataset = DATASET_REGISTRY.get(dataset_opt['type'])(dataset_opt)
-         
-        return self.dataset[index]
-    
-    def __len__(self):
-        return len(self.dataset)
-    
-# def build_dataset(dataset_opt):
-    
 # Reference: https://www.mindspore.cn/docs/zh-CN/r2.2/note/api_mapping/pytorch_diff/DataLoader.html
 def build_dataloader(dataset, dataset_opt, num_gpu=1, dist=False, sampler=None, seed=None):
     """Build dataloader.
@@ -85,14 +60,14 @@ def build_dataloader(dataset, dataset_opt, num_gpu=1, dist=False, sampler=None, 
     rank, _ = get_dist_info()
     if phase == 'train':
         if dist:  # distributed training
-            # batch_size = dataset_opt['batch_size_per_gpu']
+            batch_size = dataset_opt['batch_size_per_gpu']
             num_workers = dataset_opt['num_worker_per_gpu']
         else:  # non-distributed training
             multiplier = 1 if num_gpu == 0 else num_gpu
-            # batch_size = dataset_opt['batch_size_per_gpu'] * multiplier
+            batch_size = dataset_opt['batch_size_per_gpu'] * multiplier
             num_workers = dataset_opt['num_worker_per_gpu'] * multiplier
         # dataloader_args = dict(
-        #     dataset=dataset,
+            # dataset=dataset,
         #     batch_size=batch_size,
         #     shuffle=False,
         #     num_workers=num_workers,
@@ -100,7 +75,7 @@ def build_dataloader(dataset, dataset_opt, num_gpu=1, dist=False, sampler=None, 
         #     drop_last=True)
         dataloader_args = dict(
             # source=dataset, # 参数名不同
-            source=MyDataset(dataset_opt), # 参数名不同
+            source=dataset, # 参数名不同
             # batch_size=batch_size, MindSpore通过 mindspore.dataset.batch 操作支持
             # shuffle=False, # 默认值不同
             # num_parallel_workers=num_workers, # 参数名不同 # 报错 ValueError: num_parallel_workers exceeds the boundary between 1 and 12!
@@ -119,7 +94,7 @@ def build_dataloader(dataset, dataset_opt, num_gpu=1, dist=False, sampler=None, 
         # dataloader_args = dict(dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
         dataloader_args = dict(
             # source=dataset, # 参数名不同
-            source=MyDataset(dataset_opt), # 参数名不同
+            source=build_dataset(dataset_opt), # 参数名不同
 # MindSpore通过 mindspore.dataset.batch 操作支持 batch_size=batch_size, 
             shuffle=False, # 默认值不同
             # num_parallel_workers=num_workers, # 参数名不同 # 报错 ValueError: num_parallel_workers exceeds the boundary between 1 and 12!
@@ -130,8 +105,9 @@ def build_dataloader(dataset, dataset_opt, num_gpu=1, dist=False, sampler=None, 
 
 # MindSpore不支持
     # dataloader_args['pin_memory'] = dataset_opt.get('pin_memory', False)
-# MindSpore通过 create_tuple_iterator 的 num_epoch 参数支持, 如果设置参数大于1则与 persistent_workers 为True一致
+# MindSpore通过 create_tuple_iterator 的 num_epoch 参数支持
     # dataloader_args['persistent_workers'] = dataset_opt.get('persistent_workers', False)
+    persistent_workers = dataset_opt.get('persistent_workers', False)
 
     prefetch_mode = dataset_opt.get('prefetch_mode')
     # if prefetch_mode == 'cpu':  # CPUPrefetcher
@@ -144,10 +120,17 @@ def build_dataloader(dataset, dataset_opt, num_gpu=1, dist=False, sampler=None, 
         # prefetch_mode=None: Normal dataloader
         # prefetch_mode='cuda': dataloader for CUDAPrefetcher
         # return torch.utils.data.DataLoader(**dataloader_args)
-        return ds.GeneratorDataset(
-            **dataloader_args,
-            column_names=['name', 'type']
-            )
+      
+        dataloader = ds.GeneratorDataset(**dataloader_args, column_names=['data'])
+        dataloader = dataloader.batch(batch_size=batch_size, drop_remainder=True)
+        # 如果设置参数大于1则与 persistent_workers 为True一致
+        if persistent_workers == True:
+            persistent_workers = 2
+        else:
+            persistent_workers = -1
+        dataloader = dataloader.create_tuple_iterator(num_epochs=persistent_workers)
+        return dataloader
+    
 
 
 def worker_init_fn(worker_id, num_workers, rank, seed):

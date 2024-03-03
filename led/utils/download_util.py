@@ -2,6 +2,7 @@ import math
 import os
 import requests
 from torch.hub import download_url_to_file, get_dir
+# API 缺失，且不是核心函数，暂不做处理
 from tqdm import tqdm
 from urllib.parse import urlparse
 

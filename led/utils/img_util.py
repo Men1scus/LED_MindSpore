@@ -2,7 +2,10 @@ import cv2
 import math
 import numpy as np
 import os
-import torch
+# import torch
+import mindspore as ms
+from mindspore import Tensor
+from mindspore import ops
 from torchvision.utils import make_grid
 
 
@@ -24,7 +27,9 @@ def img2tensor(imgs, bgr2rgb=True, float32=True):
             if img.dtype == 'float64':
                 img = img.astype('float32')
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = torch.from_numpy(img.transpose(2, 0, 1))
+        # img = torch.from_numpy(img.transpose(2, 0, 1))
+        img = Tensor.from_numpy(img.transpose(2, 0, 1))
+        
         if float32:
             img = img.float()
         return img
@@ -56,10 +61,13 @@ def tensor2img(tensor, rgb2bgr=True, out_type=np.uint8, min_max=(0, 1)):
         (Tensor or list): 3D ndarray of shape (H x W x C) OR 2D ndarray of
         shape (H x W). The channel order is BGR.
     """
-    if not (torch.is_tensor(tensor) or (isinstance(tensor, list) and all(torch.is_tensor(t) for t in tensor))):
+    # if not (torch.is_tensor(tensor) or (isinstance(tensor, list) and all(torch.is_tensor(t) for t in tensor))):
+    if not (ops.is_tensor(tensor) or (isinstance(tensor, list) and all(ops.is_tensor(t) for t in tensor))):
         raise TypeError(f'tensor or list of tensors expected, got {type(tensor)}')
 
-    if torch.is_tensor(tensor):
+    # if torch.is_tensor(tensor):
+    if ops.is_tensor(tensor):
+
         tensor = [tensor]
     result = []
     for _tensor in tensor:
@@ -68,6 +76,10 @@ def tensor2img(tensor, rgb2bgr=True, out_type=np.uint8, min_max=(0, 1)):
 
         n_dim = _tensor.dim()
         if n_dim == 4:
+# References: 
+# https://pytorch.org/docs/1.3.1/torchvision/utils.html?highlight=make_grid#torchvision.utils.make_grid
+
+        
             img_np = make_grid(_tensor, nrow=int(math.sqrt(_tensor.size(0))), normalize=False).numpy()
             img_np = img_np.transpose(1, 2, 0)
             if rgb2bgr:
@@ -105,7 +117,9 @@ def tensor2img_fast(tensor, rgb2bgr=True, min_max=(0, 1)):
     """
     output = tensor.squeeze(0).detach().clamp_(*min_max).permute(1, 2, 0)
     output = (output - min_max[0]) / (min_max[1] - min_max[0]) * 255
-    output = output.type(torch.uint8).cpu().numpy()
+    # output = output.type(torch.uint8).cpu().numpy()
+    output = output.type(ms.uint8).cpu().numpy()
+
     if rgb2bgr:
         output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
     return output
