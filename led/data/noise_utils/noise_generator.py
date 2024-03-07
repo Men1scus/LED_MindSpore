@@ -4,22 +4,35 @@ import random
 from copy import deepcopy
 import pandas as pd
 from tabulate import tabulate
-import torch
-from torch import nn
+# import torch
+# from torch import nn
+import mindspore as ms
+from mindspore import nn
 import numpy as np
 from .common import *
 
-def _uniform_batch(min_, max_, shape=(1,), device='cpu'):
-    return torch.rand(shape, device=device) * (max_ - min_) + min_
+# def _uniform_batch(min_, max_, shape=(1,), device='cpu'):
+#     return torch.rand(shape, device=device) * (max_ - min_) + min_
 
-def _normal_batch(scale=1.0, loc=0.0, shape=(1,), device='cpu'):
-    return torch.randn(shape, device=device) * scale + loc
+# def _normal_batch(scale=1.0, loc=0.0, shape=(1,), device='cpu'):
+#     return torch.randn(shape, device=device) * scale + loc
 
-def _randint_batch(min_, max_, shape=(1,), device='cpu'):
-    return torch.randint(min_, max_, shape, device=device)
+# def _randint_batch(min_, max_, shape=(1,), device='cpu'):
+#     return torch.randint(min_, max_, shape, device=device)
+
+def _uniform_batch(min_, max_, shape=(1,)):
+    return ops.rand(shape) * (max_ - min_) + min_
+
+def _normal_batch(scale=1.0, loc=0.0, shape=(1,)):
+    return ops.randn(shape) * scale + loc
+
+def _randint_batch(min_, max_, shape=(1,)):
+    return ops.randint(min_, max_, shape)
 
 
-class CalibratedNoisyPairGenerator(nn.Module):
+# class CalibratedNoisyPairGenerator(nn.Module):
+class CalibratedNoisyPairGenerator(nn.Cell):
+
     def __init__(self, opt, device='cuda') -> None:
         super().__init__()
         self.device = device
@@ -37,7 +50,9 @@ class CalibratedNoisyPairGenerator(nn.Module):
         def to_tensor_dict(p_dict):
             for k, v in p_dict.items():
                 if isinstance(v, list) or isinstance(v, Number):
-                    p_dict[k] = nn.Parameter(torch.tensor(v, device=self.device), False)
+                    # p_dict[k] = nn.Parameter(torch.tensor(v, device=self.device), False)
+                    p_dict[k] = nn.Parameter(ops.tensor(v), False)
+
                 elif isinstance(v, dict):
                     p_dict[k] = to_tensor_dict(v)
             return p_dict
@@ -52,14 +67,19 @@ class CalibratedNoisyPairGenerator(nn.Module):
             self.camera_params[self.current_camera]['Kmin'],
             self.camera_params[self.current_camera]['Kmax']
         ]
-        log_K_max = torch.log(self.current_camera_params['Kmax'])
-        log_K_min = torch.log(self.current_camera_params['Kmin'])
+        # log_K_max = torch.log(self.current_camera_params['Kmax'])
+        # log_K_min = torch.log(self.current_camera_params['Kmin'])
+        log_K_max = ops.log(self.current_camera_params['Kmax'])
+        log_K_min = ops.log(self.current_camera_params['Kmin'])
+
         log_K = _uniform_batch(log_K_min, log_K_max, (batch_size, 1, 1, 1), self.device)
         if for_video:
             log_K = log_K.unsqueeze(-1)
         self.log_K = log_K
         self.cur_batch_size = batch_size
-        return torch.exp(log_K)
+        # return torch.exp(log_K)
+        return ops.exp(log_K)
+
 
     def sample_read_sigma(self):
         slope = self.current_camera_params[self.read_type]['slope']
@@ -67,7 +87,9 @@ class CalibratedNoisyPairGenerator(nn.Module):
         sigma = self.current_camera_params[self.read_type]['sigma']
         mu = self.log_K.squeeze() * slope + bias
         sample = _normal_batch(sigma, mu, (self.cur_batch_size,), self.device)
-        return torch.exp(sample).reshape(self.log_K.shape)
+        # return torch.exp(sample).reshape(self.log_K.shape)
+        return ops.exp(sample).reshape(self.log_K.shape)
+
 
     def sample_tukey_lambda(self, batch_size, for_video):
         index = _randint_batch(0, len(self.current_camera_params[self.read_type]['lambda']), shape=(batch_size,))
@@ -82,7 +104,9 @@ class CalibratedNoisyPairGenerator(nn.Module):
         sigma = self.current_camera_params['Row']['sigma']
         mu = self.log_K.squeeze() * slope + bias
         sample = _normal_batch(sigma, mu, (self.cur_batch_size,), self.device)
-        return torch.exp(sample).reshape(self.log_K.squeeze(-3).shape)
+        # return torch.exp(sample).reshape(self.log_K.squeeze(-3).shape)
+        return ops.exp(sample).reshape(self.log_K.squeeze(-3).shape)
+
 
     def sample_color_bias(self, batch_size, for_video):
         count = len(self.current_camera_params['ColorBias'])
@@ -103,15 +127,19 @@ class CalibratedNoisyPairGenerator(nn.Module):
             img += n
         img /= scale
         img = img * ratio
-        return torch.clamp(img, max=1.0)
+        # return torch.clamp(img, max=1.0)
+        return ops.clamp(img, max=1.0)
 
-    @torch.no_grad()
+
+    # @torch.no_grad()
     def forward(self, img, scale, ratio, vcam_id=None):
         b = img.size(0)
         for_video = True if img.dim() == 5 else False # B, T, C, H, W
         self.index = vcam_id if vcam_id is not None else None
 
-        img_gt = torch.clamp(img, 0, 1)
+        # img_gt = torch.clamp(img, 0, 1)
+        img_gt = ops.clamp(img, 0, 1)
+
         tail = [1 for _ in range(img.dim() - 1)]
         img = img_gt * scale.view(-1, 4, *tail[:-1]) / ratio.view(-1, *tail)
 
@@ -179,7 +207,8 @@ class CalibratedNoisyPairGenerator(nn.Module):
         return f'{self._get_name()}: {self.cameras}'
 
 
-class VirtualNoisyPairGenerator(nn.Module):
+# class VirtualNoisyPairGenerator(nn.Module):
+class VirtualNoisyPairGenerator(nn.Cell):
     def __init__(self, opt, device='cuda') -> None:
         super().__init__()
         self.opt = deepcopy(opt)
@@ -199,7 +228,9 @@ class VirtualNoisyPairGenerator(nn.Module):
         sample = self.split_range if self.sample_strategy == 'coverage' else self.uniform_range
 
         # overall system gain
-        self.k_range = torch.tensor(self.param_ranges['K'], device=self.device)
+        # self.k_range = torch.tensor(self.param_ranges['K'], device=self.device)
+        self.k_range = ops.tensor(self.param_ranges['K'])
+
 
         # read noise
         if 'g' in self.noise_type:
@@ -240,13 +271,21 @@ class VirtualNoisyPairGenerator(nn.Module):
             color_bias_sigmas = self.split_range_overlap(self.color_bias_count,
                                                          self.param_ranges['ColorBias']['sigma'],
                                                          overlap=0.1)
-            self.color_biases = torch.tensor(np.array([
+            # self.color_biases = torch.tensor(np.array([
+            #     [
+            #         random.uniform(*self.param_ranges['ColorBias']['bias']) + \
+            #             torch.randn(4).numpy() * random.uniform(*color_bias_sigmas[i]).cpu().numpy()
+            #         for _ in range(self.color_bias_count)
+            #     ] for i in range(self.virtual_camera_count)
+            # ]), device=self.device)
+            self.color_biases = ops.tensor(np.array([
                 [
                     random.uniform(*self.param_ranges['ColorBias']['bias']) + \
-                        torch.randn(4).numpy() * random.uniform(*color_bias_sigmas[i]).cpu().numpy()
+                        ops.randn(4).numpy() * random.uniform(*color_bias_sigmas[i]).cpu().numpy()
                     for _ in range(self.color_bias_count)
                 ] for i in range(self.virtual_camera_count)
-            ]), device=self.device)
+            ]))
+
             self.color_biases = nn.Parameter(self.color_biases, False)
 
     @staticmethod
@@ -254,7 +293,9 @@ class VirtualNoisyPairGenerator(nn.Module):
         results = [random.uniform(*range_) for _ in range(splits)]
         if shuffle:
             random.shuffle(results)
-        return torch.tensor(results, device=device)
+        # return torch.tensor(results, device=device)
+        return ops.tensor(results)
+            
 
     @staticmethod
     def split_range(splits, range_, shuffle=True, device='cuda'):
@@ -263,7 +304,9 @@ class VirtualNoisyPairGenerator(nn.Module):
         results = [range_[0] + i_length * i for i in range(splits)]
         if shuffle:
             random.shuffle(results)
-        return torch.tensor(results, device=device)
+        # return torch.tensor(results, device=device)
+        return ops.tensor(results)
+        
 
     @staticmethod
     def split_range_overlap(splits, range_, overlap=0.5, device='cuda'):
@@ -273,20 +316,26 @@ class VirtualNoisyPairGenerator(nn.Module):
         for i in range(splits):
             start = i_length * (1 - overlap) * i
             results.append([start, start + i_length])
-        return torch.tensor(results, device=device)
+        # return torch.tensor(results, device=device)
+        return ops.tensor(results, device=device)
+            
 
     def sample_overall_system_gain(self, batch_size, for_video):
         if self.current_camera is None:
             index = _randint_batch(0, self.virtual_camera_count, (batch_size,), self.device)
             self.current_camera = index
-        log_K_max = torch.log(self.k_range[1])
-        log_K_min = torch.log(self.k_range[0])
+        # log_K_max = torch.log(self.k_range[1])
+        # log_K_min = torch.log(self.k_range[0])
+        log_K_max = ops.log(self.k_range[1])
+        log_K_min = ops.log(self.k_range[0])
         log_K = _uniform_batch(log_K_min, log_K_max, (batch_size, 1, 1, 1), self.device)
         if for_video:
             log_K = log_K.unsqueeze(-1)
         self.log_K = log_K
         self.cur_batch_size = batch_size
-        return torch.exp(log_K)
+        # return torch.exp(log_K)
+        return ops.exp(log_K)
+
 
     def sample_read_sigma(self):
         slope = self.read_slopes[self.current_camera]
@@ -294,7 +343,9 @@ class VirtualNoisyPairGenerator(nn.Module):
         sigma = self.read_sigmas[self.current_camera]
         mu = self.log_K.squeeze() * slope + bias
         sample = _normal_batch(sigma, mu, (self.cur_batch_size,), self.device)
-        return torch.exp(sample).reshape(self.log_K.shape)
+        # return torch.exp(sample).reshape(self.log_K.shape)
+        return ops.exp(sample).reshape(self.log_K.shape)
+
 
     def sample_tukey_lambda(self, batch_size, for_video):
         tukey_lambda = self.tukey_lambdas[self.current_camera].reshape(batch_size, 1, 1, 1)
@@ -308,11 +359,15 @@ class VirtualNoisyPairGenerator(nn.Module):
         sigma = self.row_sigmas[self.current_camera]
         mu = self.log_K.squeeze() * slope + bias
         sample = _normal_batch(sigma, mu, (self.cur_batch_size,), self.device)
-        return torch.exp(sample).reshape(self.log_K.squeeze(-3).shape)
+        # return torch.exp(sample).reshape(self.log_K.squeeze(-3).shape)
+        return ops.exp(sample).reshape(self.log_K.squeeze(-3).shape)
+
 
     def sample_color_bias(self, batch_size, for_video):
         i_range = (self.k_range[1] - self.k_range[0]) / self.color_bias_count
-        index = ((torch.exp(self.log_K.squeeze()) - self.k_range[0]) // i_range).long()
+        # index = ((torch.exp(self.log_K.squeeze()) - self.k_range[0]) // i_range).long()
+        index = ((ops.exp(self.log_K.squeeze()) - self.k_range[0]) // i_range).long()
+
         color_bias = self.color_biases[self.current_camera, index]
         color_bias = color_bias.reshape(batch_size, 4, 1, 1)
         if for_video:
@@ -328,16 +383,22 @@ class VirtualNoisyPairGenerator(nn.Module):
             img += n
         img /= scale
         img = img * ratio
-        return torch.clamp(img, max=1.0)
+        # return torch.clamp(img, max=1.0)
+        return ops.clamp(img, max=1.0)
 
-    @torch.no_grad()
+
+    # @torch.no_grad()
     def forward(self, img, scale, ratio, vcam_id=None):
         b = img.size(0)
         for_video = True if img.dim() == 5 else False # B, T, C, H, W
-        self.current_camera = vcam_id * torch.ones((b,), dtype=torch.long, device=self.device) \
+        # self.current_camera = vcam_id * torch.ones((b,), dtype=torch.long, device=self.device) \
+        #                       if vcam_id is not None else None
+        self.current_camera = vcam_id * ops.ones((b,), dtype=ms.Tensor.long) \
                               if vcam_id is not None else None
 
-        img_gt = torch.clamp(img, 0, 1)
+        # img_gt = torch.clamp(img, 0, 1)
+        img_gt = ops.clamp(img, 0, 1)
+
         tail = [1 for _ in range(img.dim() - 1)]
         img = img_gt * scale.view(-1, 4, *tail[:-1]) / ratio.view(-1, *tail)
 
@@ -438,7 +499,9 @@ class VirtualNoisyPairGenerator(nn.Module):
             l_out = '['
             count = len(l)
             for i, f in enumerate(l):
-                if torch.is_tensor(f):
+                # if torch.is_tensor(f):
+                if ops.is_tensor(f):
+                
                     f = f.cpu().numpy()
                 if auto_newline and i % int(math.sqrt(count)) == 0 and not isinstance(f, np.ndarray):
                     l_out += '\n  '

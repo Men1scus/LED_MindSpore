@@ -4,6 +4,7 @@ import threading
 import mindspore as ms 
 # from torch.utils.data import DataLoader
 from mindspore.dataset import GeneratorDataset
+from mindspore import ops 
 
 class PrefetchGenerator(threading.Thread):
     """A general prefetch generator.
@@ -113,7 +114,7 @@ class CUDAPrefetcher():
         # with torch.cuda.stream(self.stream):
         for k, v in self.batch.items():
             # if torch.is_tensor(v):
-            if ms.ops.is_tensor(v):
+            if ops.is_tensor(v):
                 self.batch[k] = self.batch[k].to(device=self.device, non_blocking=True)
 
     def next(self):

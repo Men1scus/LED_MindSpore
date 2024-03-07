@@ -6,13 +6,16 @@ http://timothybrooks.com/tech/unprocessing
 
 import numpy as np
 import torch
+import mindspore as ms
+from mindspore import ops
 import contextlib
 
 from os.path import join
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-class Interp1d(torch.autograd.Function):
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = ms.get_context("device_target")
+# class Interp1d(torch.autograd.Function):
+class Interp1d:
     def __call__(self, x, y, xnew, out=None):
         return self.forward(x, y, xnew, out)
 
@@ -47,7 +50,9 @@ class Interp1d(torch.autograd.Function):
         require_grad = {}
         v = {}
         device = []
-        eps = torch.finfo(y.dtype).eps
+        # eps = torch.finfo(y.dtype).eps
+        eps = np.finfo(y.dtype).eps
+
         for name, vec in {'x': x, 'y': y, 'xnew': xnew}.items():
             assert len(vec.shape) <= 2, 'interp1d: all inputs must be '\
                                         'at most 2-D.'
@@ -94,7 +99,8 @@ class Interp1d(torch.autograd.Function):
             else:
                 ynew = out.reshape(shape_ynew)
         if out is None:
-            ynew = torch.zeros(*shape_ynew, device=device)
+            # ynew = torch.zeros(*shape_ynew, device=device)
+            ynew = ops.zeros(*shape_ynew, device=device)
 
         # moving everything to the desired device in case it was not there
         # already (not handling the case things do not fit entirely, user will
@@ -110,8 +116,10 @@ class Interp1d(torch.autograd.Function):
         if v['xnew'].shape[0] == 1:
             v['xnew'] = v['xnew'].expand(v['x'].shape[0], -1)
 
-        torch.searchsorted(v['x'].contiguous(),
-                           v['xnew'].contiguous(), out=ind)
+        # torch.searchsorted(v['x'].contiguous(),
+        #                    v['xnew'].contiguous(), out=ind)
+        ops.searchsorted(v['x'].contiguous(),
+                           v['xnew'].contiguous(), out=ind)   
 
         # the `-1` is because searchsorted looks for the index where the values
         # must be inserted to preserve order. And we want the index of the
@@ -120,13 +128,17 @@ class Interp1d(torch.autograd.Function):
         # we clamp the index, because the number of intervals is x.shape-1,
         # and the left neighbour should hence be at most number of intervals
         # -1, i.e. number of columns in x -2
-        ind = torch.clamp(ind, 0, v['x'].shape[1] - 1 - 1)
+        # ind = torch.clamp(ind, 0, v['x'].shape[1] - 1 - 1)
+        ind = ops.clamp(ind, 0, v['x'].shape[1] - 1 - 1)
+
 
         # helper function to select stuff according to the found indices.
         def sel(name):
             if is_flat[name]:
                 return v[name].contiguous().view(-1)[ind]
-            return torch.gather(v[name], 1, ind)
+            # return torch.gather(v[name], 1, ind)
+            return ops.gather_elements(v[name], 1, ind)
+
 
         # activating gradient storing for everything now
         enable_grad = False
@@ -142,19 +154,19 @@ class Interp1d(torch.autograd.Function):
         is_flat['slopes'] = is_flat['x']
         # now we have found the indices of the neighbors, we start building the
         # output. Hence, we start also activating gradient tracking
-        with torch.enable_grad() if enable_grad else contextlib.suppress():
-            v['slopes'] = (
-                    (v['y'][:, 1:]-v['y'][:, :-1])
-                    /
-                    (eps + (v['x'][:, 1:]-v['x'][:, :-1]))
-                )
+        # with torch.enable_grad() if enable_grad else contextlib.suppress():
+        v['slopes'] = (
+                (v['y'][:, 1:]-v['y'][:, :-1])
+                /
+                (eps + (v['x'][:, 1:]-v['x'][:, :-1]))
+            )
 
-            # now build the linear interpolation
-            ynew = sel('y') + sel('slopes')*(
-                                    v['xnew'] - sel('x'))
+        # now build the linear interpolation
+        ynew = sel('y') + sel('slopes')*(
+                                v['xnew'] - sel('x'))
 
-            if reshaped_xnew:
-                ynew = ynew.view(original_xnew_shape)
+        if reshaped_xnew:
+            ynew = ynew.view(original_xnew_shape)
 
         ctx.save_for_backward(ynew, *saved_inputs)
         return ynew
@@ -186,7 +198,9 @@ def apply_ccms(images, ccms):
         0, 2, 3, 1)  # Permute the image tensor to BxHxWxC format from BxCxHxW format
     images = images[:, :, :, None, :]
     ccms = ccms[:, None, None, :, :]
-    outs = torch.sum(images * ccms, dim=-1)
+    # outs = torch.sum(images * ccms, dim=-1)
+    outs = ops.sum(images * ccms, dim=-1)
+
     # Re-Permute the tensor back to BxCxHxW format
     outs = outs.permute(0, 3, 1, 2)
     return outs
@@ -194,25 +208,35 @@ def apply_ccms(images, ccms):
 
 def gamma_compression(images, gamma=2.2):
     """Converts from linear to gamma space."""
-    outs = torch.clamp(images, min=1e-8) ** (1 / gamma)
+    # outs = torch.clamp(images, min=1e-8) ** (1 / gamma)
+    outs = ops.clamp(images, min=1e-8) ** (1 / gamma)
+
     # outs = (1 + gamma[0]) * np.power(images, 1.0/gamma[1]) - gamma[0] + gamma[2]*images
-    outs = torch.clamp((outs*255).int(), min=0, max=255).float() / 255
+    # outs = torch.clamp((outs*255).int(), min=0, max=255).float() / 255
+    outs = ops.clamp((outs*255).int(), min=0, max=255).float() / 255
+
     return outs
 
 
 def gamma_compression_grad(images, gamma=2.2):
     """Converts from linear to gamma space."""
-    outs = torch.clamp(images, min=1e-8) ** (1 / gamma)
+    # outs = torch.clamp(images, min=1e-8) ** (1 / gamma)
+    outs = ops.clamp(images, min=1e-8) ** (1 / gamma)
+
     # outs = (1 + gamma[0]) * np.power(images, 1.0/gamma[1]) - gamma[0] + gamma[2]*images
     return outs
 
 
 def binning(bayer_images):
     """RGBG -> RGB"""
-    lin_rgb = torch.stack([
+    # lin_rgb = torch.stack([
+    #     bayer_images[:,0,...],
+    #     torch.mean(bayer_images[:, [1,3], ...], dim=1),
+    #     bayer_images[:,2,...]], dim=1)
+    lin_rgb = ops.stack([
         bayer_images[:,0,...],
-        torch.mean(bayer_images[:, [1,3], ...], dim=1),
-        bayer_images[:,2,...]], dim=1)
+        ops.mean(bayer_images[:, [1,3], ...], axis=1),
+        bayer_images[:,2,...]], axis=1)
 
     return lin_rgb
 
@@ -223,12 +247,15 @@ def process(bayer_images, wbs, cam2rgbs, gamma=2.2, CRF=None):
     # White balance.
     bayer_images = apply_gains(orig_img, wbs)
     # Binning
-    bayer_images = torch.clamp(bayer_images, min=0.0, max=1.0)
+    # bayer_images = torch.clamp(bayer_images, min=0.0, max=1.0)
+    bayer_images = ms.clamp(bayer_images, min=0.0, max=1.0)
     images = binning(bayer_images)
     # Color correction.
     images = apply_ccms(images, cam2rgbs)
     # Gamma compression.
-    images = torch.clamp(images, min=0.0, max=1.0)
+    # images = torch.clamp(images, min=0.0, max=1.0)
+    images = ops.clamp(images, min=0.0, max=1.0)
+
     if CRF is None:
         images = gamma_compression(images, gamma)
     else:
@@ -243,12 +270,16 @@ def process_grad(bayer_images, wbs, cam2rgbs, gamma=2.2, CRF=None):
     # White balance.
     bayer_images = apply_gains(orig_img, wbs)
     # Binning
-    bayer_images = torch.clamp(bayer_images, min=0.0, max=1.0)
+    # bayer_images = torch.clamp(bayer_images, min=0.0, max=1.0)
+    bayer_images = ops.clamp(bayer_images, min=0.0, max=1.0)
+
     images = binning(bayer_images)
     # Color correction.
     images = apply_ccms(images, cam2rgbs)
     # Gamma compression.
-    images = torch.clamp(images, min=0.0, max=1.0)
+    # images = torch.clamp(images, min=0.0, max=1.0)
+    images = ops.clamp(images, min=0.0, max=1.0)
+
     if CRF is None:
         images = gamma_compression_grad(images, gamma)
     else:
@@ -260,7 +291,9 @@ def process_grad(bayer_images, wbs, cam2rgbs, gamma=2.2, CRF=None):
 def camera_response_function(images, CRF):
     E, fs = CRF # unpack CRF data
 
-    outs = torch.zeros_like(images)
+    # outs = torch.zeros_like(images)
+    outs = ops.zeros_like(images)
+
     device = images.device
 
     for i in range(images.shape[0]):
@@ -268,13 +301,17 @@ def camera_response_function(images, CRF):
         out = Interp1d()(E.to(device), fs.to(device), img)
         outs[i, ...] = out.view(3, images.shape[2], images.shape[3])
 
-    outs = torch.clamp((outs*255).int(), min=0, max=255).float() / 255
+    # outs = torch.clamp((outs*255).int(), min=0, max=255).float() / 255
+    outs = ops.clamp((outs*255).int(), min=0, max=255).float() / 255
+
     return outs
 
 def camera_response_function_grad(images, CRF):
     E, fs = CRF # unpack CRF data
 
-    outs = torch.zeros_like(images)
+    # outs = torch.zeros_like(images)
+    outs = ops.zeros_like(images)
+
     device = images.device
 
     for i in range(images.shape[0]):
@@ -291,10 +328,14 @@ def raw2rgb(packed_raw, raw, CRF=None, gamma=2.2):
     cam2rgb = raw.rgb_camera_matrix[:3, :3]
 
     if isinstance(packed_raw, np.ndarray):
-        packed_raw = torch.from_numpy(packed_raw).float()
+        # packed_raw = torch.from_numpy(packed_raw).float()
+        packed_raw = ms.Tensor.from_numpy(packed_raw).float()
+        
 
-    wb = torch.from_numpy(wb).float().to(packed_raw.device)
-    cam2rgb = torch.from_numpy(cam2rgb).float().to(packed_raw.device)
+    # wb = torch.from_numpy(wb).float().to(packed_raw.device)
+    # cam2rgb = torch.from_numpy(cam2rgb).float().to(packed_raw.device)
+    wb = ms.Tensor.from_numpy(wb).float()
+    cam2rgb = ms.Tensor.from_numpy(cam2rgb).float()
 
     out = process(packed_raw[None], wbs=wb[None], cam2rgbs=cam2rgb[None], gamma=gamma, CRF=CRF)[0, ...].numpy()
 
@@ -302,9 +343,12 @@ def raw2rgb(packed_raw, raw, CRF=None, gamma=2.2):
 
 
 def raw2rgb_v2(packed_raw, wb, ccm, CRF=None, gamma=2.2): # RGBG
-    packed_raw = torch.from_numpy(packed_raw).float()
-    wb = torch.from_numpy(wb).float()
-    cam2rgb = torch.from_numpy(ccm).float()
+    # packed_raw = torch.from_numpy(packed_raw).float()
+    # wb = torch.from_numpy(wb).float()
+    # cam2rgb = torch.from_numpy(ccm).float()
+    packed_raw = ms.Tensor.from_numpy(packed_raw).float()
+    wb = ms.Tensor.from_numpy(wb).float()
+    cam2rgb = ms.Tensor.from_numpy(ccm).float()
     out = process(packed_raw[None], wbs=wb[None], cam2rgbs=cam2rgb[None], gamma=gamma, CRF=CRF)[0, ...].numpy()
     return out
 
@@ -327,8 +371,10 @@ def raw2rgb_postprocess(packed_raw, raw, CRF=None):
     wb /= wb[1]
     cam2rgb = raw.rgb_camera_matrix[:3, :3]
 
-    wb = torch.from_numpy(wb[None]).float().to(packed_raw.device)
-    cam2rgb = torch.from_numpy(cam2rgb[None]).float().to(packed_raw.device)
+    # wb = torch.from_numpy(wb[None]).float().to(packed_raw.device)
+    # cam2rgb = torch.from_numpy(cam2rgb[None]).float().to(packed_raw.device)
+    wb = ms.from_numpy(wb[None]).float().to(packed_raw.device)
+    cam2rgb = ms.from_numpy(cam2rgb[None]).float().to(packed_raw.device)
     out = process(packed_raw, wbs=wb, cam2rgbs=cam2rgb, gamma=2.2, CRF=CRF)
     return out
 
@@ -382,5 +428,7 @@ def load_CRF(EMoR_path):
     E, _, _ = read_emor(join(EMoR_path, 'emor.txt'))
     E = torch.from_numpy(E).repeat(3, 1)
     fs = torch.from_numpy(fs)
+    # E = ms.Tensor.from_numpy(E).repeat(3, 1)
+    # fs = ms.Tensor.from_numpy(fs)
     CRF = (E, fs)
     return CRF

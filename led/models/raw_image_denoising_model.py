@@ -329,14 +329,14 @@ class LEDFinetuneModel(RAWBaseModel):
     #         self.black_level = data['black_level'].to(self.device)
     #         self.white_level = data['white_level'].to(self.device)
     def feed_data(self, data):
-        self.lq = data[0]['lq']
-        self.gt = data[0]['gt']
-        self.ccm = data[0]['ccm']
-        self.wb = data[0]['wb']
-        self.ratio = data[0]['ratio']
+        self.lq = data['lq']
+        self.gt = data['gt']
+        self.ccm = data['ccm']
+        self.wb = data['wb']
+        self.ratio = data['ratio']
         if 'black_level' in data:
-            self.black_level = data[0]['black_level']
-            self.white_level = data[0]['white_level']
+            self.black_level = data['black_level']
+            self.white_level = data['white_level']
 
     def optimize_parameters(self, current_iter):
         if current_iter == (self.align_iter + 1):
