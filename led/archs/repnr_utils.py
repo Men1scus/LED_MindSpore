@@ -1,11 +1,16 @@
 from copy import deepcopy
 import math
-import torch
-from torch import nn
-from torch.nn import init
-from torch.nn import functional as F
-from torch.nn.init import kaiming_normal_, kaiming_uniform_
+# import torch
+# from torch import nn
+# from torch.nn import init
+# from torch.nn import functional as F
+# from torch.nn.init import kaiming_normal_, kaiming_uniform_
 from torch.nn.modules.utils import _reverse_repeat_tuple
+
+import mindspore as ms
+from mindspore import nn
+from mindspore import ops
+from mindspore.common import initializer
 
 def zero_init_(x, a=None):
     x.zero_()
@@ -20,27 +25,43 @@ def build_repnr_arch_from_base(base_arch, **repnr_kwargs):
             return RepNRConv2d(base_arch, **repnr_kwargs)
 
         repnr_arch = deepcopy(base_arch)
-        for n, c in base_arch.named_children():
-            if n not in dont_convert_module:
-                setattr(repnr_arch, n, recursive_converter(c, **repnr_kwargs))
+        # for n, c in base_arch.named_children():
+        #     if n not in dont_convert_module:
+        #         setattr(repnr_arch, n, recursive_converter(c, **repnr_kwargs))
+
+        for m in base_arch.cells_and_names():
+            if m[0] not in dont_convert_module:
+                setattr(repnr_arch, m[0], recursive_converter(m[1], **repnr_kwargs))
+
         return repnr_arch
 
     repnr_arch = recursive_converter(base_arch, **repnr_kwargs)
     return RepNRBase(base_arch, repnr_arch)
 
 
-class RepNRConv2d(nn.Module):
-    def _init_conv(self, init_type='kaiming_uniform_'):
-        weight = torch.zeros_like(self.main_weight)
+# class RepNRConv2d(nn.Module):
+class RepNRConv2d(nn.Cell):
+    # def _init_conv(self, init_type='kaiming_uniform_'):
+    def _init_conv(self, init_type='HeUniform'):
+        super().__init__()
+        # weight = torch.zeros_like(self.main_weight)
+        weight = ops.zeros_like(self.main_weight)
         init_func = eval(init_type)
         init_func(weight, a=math.sqrt(5))
-        fan_in, _ = init._calculate_fan_in_and_fan_out(weight)
-        bias = torch.zeros((weight.size(0), ),
+        # fan_in, _ = init._calculate_fan_in_and_fan_out(weight)
+        fan_in, _ = initializer._calculate_fan_in_and_fan_out(weight)
+
+        # bias = torch.zeros((weight.size(0), ),
+        #                     dtype=self.main_weight.dtype,
+        #                     device=self.main_weight.device)
+
+        bias = ops.zeros((weight.size(0), ),
                             dtype=self.main_weight.dtype,
-                            device=self.main_weight.device)
+                            )
         if fan_in != 0:
             bound = 1 / math.sqrt(fan_in)
-            init.uniform_(bias, -bound, bound)
+            # init.uniform_(bias, -bound, bound)
+            bias = ops.uniform(bias.shape, -bound, bound)
         return weight, bias
 
     def _init_from_conv2d(self, conv2d: nn.Conv2d):
@@ -70,18 +91,28 @@ class RepNRConv2d(nn.Module):
 
         self.align_weights = nn.ParameterList(
             [
-                nn.Parameter(torch.ones((1, align_channles, 1, 1),
+                # nn.Parameter(torch.ones((1, align_channles, 1, 1),
+                #                         dtype=self.main_weight.dtype,
+                #                         device=self.main_weight.device) * align_init_weight,
+                #              requires_grad=True)
+
+                nn.Parameter(ops.ones((1, align_channles, 1, 1),
                                         dtype=self.main_weight.dtype,
-                                        device=self.main_weight.device) * align_init_weight,
+                                        ) * align_init_weight,
                              requires_grad=True)
                 for _ in range(self.branch_num + 1)
             ]
         )
         self.align_biases = nn.ParameterList(
             [
-                nn.Parameter(torch.ones((1, align_channles, 1, 1),
+                # nn.Parameter(torch.ones((1, align_channles, 1, 1),
+                #                         dtype=self.main_weight.dtype,
+                #                         device=self.main_weight.device) * align_init_bias,
+                #             requires_grad=True)
+
+                nn.Parameter(ops.ones((1, align_channles, 1, 1),
                                         dtype=self.main_weight.dtype,
-                                        device=self.main_weight.device) * align_init_bias,
+                                        ) * align_init_bias,
                             requires_grad=True)
                 for _ in range(self.branch_num + 1)
             ]
@@ -89,12 +120,16 @@ class RepNRConv2d(nn.Module):
 
     def _init_aux_conv(self, aux_conv_opts):
         if 'init' not in aux_conv_opts:
-            aux_conv_opts['init'] = 'kaiming_normal_'
+            # aux_conv_opts['init'] = 'kaiming_normal_'
+            aux_conv_opts['init'] = 'HeNormal'
+
 
         aux_weight, aux_bias = self._init_conv(init_type=aux_conv_opts['init'])
         self.aux_weight = nn.Parameter(aux_weight, requires_grad=True)
-        self.aux_bias = nn.Parameter(torch.zeros_like(aux_bias), requires_grad=True) \
-                        if aux_conv_opts.get('bias', False) else torch.zeros_like(aux_bias)
+        # self.aux_bias = nn.Parameter(torch.zeros_like(aux_bias), requires_grad=True) \
+        #                 if aux_conv_opts.get('bias', False) else torch.zeros_like(aux_bias)
+        self.aux_bias = nn.Parameter(ops.zeros_like(aux_bias), requires_grad=True) \
+                        if aux_conv_opts.get('bias', False) else ops.zeros_like(aux_bias)
 
     def __init__(self, conv2d, branch_num,
                        align_opts, aux_conv_opts=None,
@@ -128,17 +163,23 @@ class RepNRConv2d(nn.Module):
         # k1, b1 is the weight and bias of alignment
         def depthwise_to_normal(k, padding):
             k = k.reshape(-1)
-            k = torch.diag(k).unsqueeze(-1).unsqueeze(-1)
-            k = F.pad(k, _reverse_repeat_tuple(padding, 2), mode='constant', value=0.0)
+            # k = torch.diag(k).unsqueeze(-1).unsqueeze(-1)
+            k = ops.diag(k).unsqueeze(-1).unsqueeze(-1)
+            # k = F.pad(k, _reverse_repeat_tuple(padding, 2), mode='constant', value=0.0)
+            k = ops.pad(k, _reverse_repeat_tuple(padding, 2), mode='constant', value=0.0)
             return k
 
         def bias_pad(b, padding):
-            return F.pad(b, _reverse_repeat_tuple(padding, 2), mode='replicate')
+            # return F.pad(b, _reverse_repeat_tuple(padding, 2), mode='replicate')
+            return ops.pad(b, _reverse_repeat_tuple(padding, 2), mode='replicate')
+
 
         padding = (k2.shape[-2] - 1) // 2, (k2.shape[-1] - 1) // 2
         k1 = depthwise_to_normal(k1, padding)
-        k = F.conv2d(k2, k1, stride=1, padding='same')
-        b = F.conv2d(bias_pad(b1, padding), k2, bias=b2, stride=1).reshape(-1)
+        # k = F.conv2d(k2, k1, stride=1, padding='same')
+        # b = F.conv2d(bias_pad(b1, padding), k2, bias=b2, stride=1).reshape(-1)
+        k = ops.conv2d(k2, k1, stride=1, padding='same')
+        b = ops.conv2d(bias_pad(b1, padding), k2, bias=b2, stride=1).reshape(-1)
         return k, b
 
     @staticmethod
@@ -149,8 +190,10 @@ class RepNRConv2d(nn.Module):
     def _weight_and_bias(self):
         index = self.cur_branch
         align_weight = self.align_weights[index]
+        # align_bias = self.align_biases[index] if self.align_biases is not None \
+        #     else torch.zeros_like(align_weight)
         align_bias = self.align_biases[index] if self.align_biases is not None \
-            else torch.zeros_like(align_weight)
+            else ops.zeros_like(align_weight)
 
         main_weight, main_bias = self._sequential_reparamterize(
             align_weight, align_bias, self.main_weight, self.main_bias)
@@ -163,23 +206,31 @@ class RepNRConv2d(nn.Module):
 
     def _reparameterize_forward(self, x):
         weight, bias = self._weight_and_bias
-        x = F.pad(x, self.padding, self.padding_mode, value=0.0)
-        x = F.conv2d(x, weight, bias, stride=self.stride)
+        # x = F.pad(x, self.padding, self.padding_mode, value=0.0)
+        # x = F.conv2d(x, weight, bias, stride=self.stride)
+        x = ops.pad(x, self.padding, self.padding_mode, value=0.0)
+        x = ops.conv2d(x, weight, bias, stride=self.stride)
         return x
 
     def _trivial_forward(self, x):
         index = self.cur_branch
         align_weight = self.align_weights[index]
+        # align_bias = self.align_biases[index] if self.align_biases is not None \
+        #     else torch.zeros_like(align_weight)
         align_bias = self.align_biases[index] if self.align_biases is not None \
-            else torch.zeros_like(align_weight)
+            else ops.zeros_like(align_weight)
 
         aligned_x = x * align_weight + align_bias
-        padded_aligned_x = F.pad(aligned_x, self.padding, self.padding_mode, value=0.0)
-        main_x = F.conv2d(padded_aligned_x, self.main_weight, self.main_bias, stride=self.stride)
+        # padded_aligned_x = F.pad(aligned_x, self.padding, self.padding_mode, value=0.0)
+        # main_x = F.conv2d(padded_aligned_x, self.main_weight, self.main_bias, stride=self.stride)
+        padded_aligned_x = ops.pad(aligned_x, self.padding, self.padding_mode, value=0.0)
+        main_x = ops.conv2d(padded_aligned_x, self.main_weight, self.main_bias, stride=self.stride)
 
         if hasattr(self, 'aux_weight'):
-            padded_x = F.pad(x, self.padding, self.padding_mode, value=0.0)
-            aux_x = F.conv2d(padded_x, self.aux_weight, self.aux_bias, stride=self.stride)
+            # padded_x = F.pad(x, self.padding, self.padding_mode, value=0.0)
+            # aux_x = F.conv2d(padded_x, self.aux_weight, self.aux_bias, stride=self.stride)
+            padded_x = ops.pad(x, self.padding, self.padding_mode, value=0.0)
+            aux_x = ops.conv2d(padded_x, self.aux_weight, self.aux_bias, stride=self.stride)
             main_x = main_x + aux_x
 
         return main_x
@@ -188,20 +239,27 @@ class RepNRConv2d(nn.Module):
         index = self.cur_branch
         features = {}
         align_weight = self.align_weights[index]
+        # align_bias = self.align_biases[index] if self.align_biases is not None \
+        #     else torch.zeros_like(align_weight)
         align_bias = self.align_biases[index] if self.align_biases is not None \
-            else torch.zeros_like(align_weight)
+            else ops.zeros_like(align_weight)
 
         features['in_feat'] = x
         aligned_x = x * align_weight + align_bias
         features['aligned_feat'] = aligned_x
 
-        padded_aligned_x = F.pad(aligned_x, self.padding, self.padding_mode, value=0.0)
-        main_x = F.conv2d(padded_aligned_x, self.main_weight, self.main_bias, stride=self.stride)
+        # padded_aligned_x = F.pad(aligned_x, self.padding, self.padding_mode, value=0.0)
+        # main_x = F.conv2d(padded_aligned_x, self.main_weight, self.main_bias, stride=self.stride)
+        padded_aligned_x = ops.pad(aligned_x, self.padding, self.padding_mode, value=0.0)
+        main_x = ops.conv2d(padded_aligned_x, self.main_weight, self.main_bias, stride=self.stride)
+
         features['main_feat'] = main_x
 
         if hasattr(self, 'aux_weight'):
-            padded_x = F.pad(x, self.padding, self.padding_mode, value=0.0)
-            aux_x = F.conv2d(padded_x, self.aux_weight, self.aux_bias, stride=1)
+            # padded_x = F.pad(x, self.padding, self.padding_mode, value=0.0)
+            # aux_x = F.conv2d(padded_x, self.aux_weight, self.aux_bias, stride=1)
+            padded_x = ops.pad(x, self.padding, self.padding_mode, value=0.0)
+            aux_x = ops.conv2d(padded_x, self.aux_weight, self.aux_bias, stride=1)
             features['aux_feat'] = aux_x
             main_x = main_x + aux_x
 
@@ -242,7 +300,8 @@ class RepNRConv2d(nn.Module):
         return s.format(**self.__dict__)
 
 
-class RepNRBase(nn.Module):
+# class RepNRBase(nn.Module):
+class RepNRBase(nn.Cell):
     def __init__(self, arch, repnr_arch) -> None:
         super().__init__()
         self.base_module = arch
@@ -321,7 +380,7 @@ class RepNRBase(nn.Module):
     def __repr__(self):
         return f'{self._get_name()}: {str(self.repnr_module)}'
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def deploy(self):
         def has_repnr_conv(m):
             for mm in m.modules():

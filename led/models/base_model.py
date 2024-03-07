@@ -1,9 +1,12 @@
 import os
 import time
 import torch
+import mindspore as ms
 from collections import OrderedDict
 from copy import deepcopy
 from torch.nn.parallel import DataParallel, DistributedDataParallel
+from mindspore.experimental import optim
+from mindspore import nn, ops
 
 from led.models import lr_scheduler as lr_scheduler
 from led.utils import get_root_logger
@@ -95,8 +98,10 @@ class BaseModel():
         # net = net.to(self.device)
         if self.opt['dist']:
             find_unused_parameters = self.opt.get('find_unused_parameters', False)
+            # net = DistributedDataParallel(
+            #     net, device_ids=[torch.cuda.current_device()], find_unused_parameters=find_unused_parameters)
             net = DistributedDataParallel(
-                net, device_ids=[torch.cuda.current_device()], find_unused_parameters=find_unused_parameters)
+                net, device_ids=[ms.get_context('device_ids')], find_unused_parameters=find_unused_parameters)
         elif self.opt['num_gpu'] > 1:
             net = DataParallel(net)
         return net
@@ -104,18 +109,29 @@ class BaseModel():
     def get_optimizer(self, optim_type, params, lr, **kwargs):
         if optim_type == 'Adam':
             optimizer = torch.optim.Adam(params, lr, **kwargs)
+            # optimizer = optim.Adam(params, lr, **kwargs)
         elif optim_type == 'AdamW':
-            optimizer = torch.optim.AdamW(params, lr, **kwargs)
-        elif optim_type == 'Adamax':
-            optimizer = torch.optim.Adamax(params, lr, **kwargs)
+            # optimizer = torch.optim.AdamW(params, lr, **kwargs)
+            optimizer = optim.AdamW(params, lr, **kwargs)
+
+        # elif optim_type == 'Adamax':
+        #     optimizer = torch.optim.Adamax(params, lr, **kwargs)
+
         elif optim_type == 'SGD':
-            optimizer = torch.optim.SGD(params, lr, **kwargs)
+            # optimizer = torch.optim.SGD(params, lr, **kwargs)
+            optimizer = optim.SGD(params, lr, **kwargs)
+
         elif optim_type == 'ASGD':
-            optimizer = torch.optim.ASGD(params, lr, **kwargs)
-        elif optim_type == 'RMSprop':
-            optimizer = torch.optim.RMSprop(params, lr, **kwargs)
+            # optimizer = torch.optim.ASGD(params, lr, **kwargs)
+            optimizer = nn.ASGD(params, lr, **kwargs)
+
+        # elif optim_type == 'RMSprop':
+        #     optimizer = torch.optim.RMSprop(params, lr, **kwargs)
+            
         elif optim_type == 'Rprop':
-            optimizer = torch.optim.Rprop(params, lr, **kwargs)
+            # optimizer = torch.optim.Rprop(params, lr, **kwargs)
+            optimizer = nn.Rprop(params, lr, **kwargs)
+
         else:
             raise NotImplementedError(f'optimizer {optim_type} is not supported yet.')
         return optimizer
@@ -304,6 +320,8 @@ class BaseModel():
         logger = get_root_logger()
         net = self.get_bare_model(net)
         load_net = torch.load(load_path, map_location=lambda storage, loc: storage)
+        # load_net = ms.load_checkpoint(load_path)
+
         if param_key is not None:
             if param_key not in load_net and 'params' in load_net:
                 param_key = 'params'
@@ -341,6 +359,8 @@ class BaseModel():
             while retry > 0:
                 try:
                     torch.save(state, save_path)
+                    # ms.save_checkpoint(state, save_path)
+
                 except Exception as e:
                     logger = get_root_logger()
                     logger.warning(f'Save training state error: {e}, remaining retry times: {retry - 1}')
@@ -376,18 +396,19 @@ class BaseModel():
         Args:
             loss_dict (OrderedDict): Loss dict.
         """
-        with torch.no_grad():
-            if self.opt['dist']:
-                keys = []
-                losses = []
-                for name, value in loss_dict.items():
-                    keys.append(name)
-                    losses.append(value)
-                losses = torch.stack(losses, 0)
-                torch.distributed.reduce(losses, dst=0)
-                if self.opt['rank'] == 0:
-                    losses /= self.opt['world_size']
-                loss_dict = {key: loss for key, loss in zip(keys, losses)}
+        # with torch.no_grad():
+        if self.opt['dist']:
+            keys = []
+            losses = []
+            for name, value in loss_dict.items():
+                keys.append(name)
+                losses.append(value)
+            # losses = torch.stack(losses, 0)
+            losses = ops.stack(losses, 0)
+            # torch.distributed.reduce(losses, dst=0)
+            if self.opt['rank'] == 0:
+                losses /= self.opt['world_size']
+            loss_dict = {key: loss for key, loss in zip(keys, losses)}
 
             log_dict = OrderedDict()
             for name, value in loss_dict.items():

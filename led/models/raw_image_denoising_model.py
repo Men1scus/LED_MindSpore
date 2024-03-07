@@ -1,6 +1,8 @@
 from copy import deepcopy
 import os
-import torch
+# import torch
+import mindspore as ms
+from mindspore import ops
 from collections import OrderedDict
 from os import path as osp
 from tqdm import tqdm
@@ -47,8 +49,9 @@ class RAWImageDenoisingModel(RAWBaseModel):
             logger.info(f'Sampled Cameras: \n{self.noise_g.log_str}')
 
             dump_path = os.path.join(self.opt['path']['experiments_root'], 'noise_g.pth')
-            torch.save(self.noise_g.state_dict(), dump_path)
-
+            # torch.save(self.noise_g.state_dict(), dump_path)
+            ms.save_checkpoint(self.noise_g, dump_path)
+            
         # load pretrained models
         load_path = self.opt['path'].get('pretrain_network_g', None)
         if load_path is not None:
@@ -75,7 +78,9 @@ class RAWImageDenoisingModel(RAWBaseModel):
             # define network net_g with Exponential Moving Average (EMA)
             # net_g_ema is used only for testing on one GPU and saving
             # There is no need to wrap with DistributedDataParallel
-            self.net_g_ema = build_network(self.opt['network_g']).to(self.device)
+            # self.net_g_ema = build_network(self.opt['network_g']).to(self.device)
+            self.net_g_ema = build_network(self.opt['network_g'])
+
             # load pretrained model
             load_path = self.opt['path'].get('pretrain_network_g', None)
             if repnr_opt:
@@ -94,7 +99,9 @@ class RAWImageDenoisingModel(RAWBaseModel):
 
         # define losses
         if train_opt.get('pixel_opt'):
-            self.cri_pix = build_loss(train_opt['pixel_opt']).to(self.device)
+            # self.cri_pix = build_loss(train_opt['pixel_opt']).to(self.device)
+            self.cri_pix = build_loss(train_opt['pixel_opt'])
+
         else:
             raise NotImplementedError()
 
@@ -130,13 +137,14 @@ class RAWImageDenoisingModel(RAWBaseModel):
         self.optimizer_g.zero_grad()
 
         if hasattr(self, 'noise_g'):
-            self.camera_id = torch.randint(0, len(self.noise_g), (1,)).item()
-            with torch.no_grad():
-                scale = self.white_level - self.black_level
-                self.gt = (self.gt - self.black_level) / scale
-                self.gt, self.lq, self.curr_metadata = self.noise_g(self.gt, scale, self.ratio, self.camera_id)
-                if self.augment is not None:
-                    self.gt, self.lq = self.augment(self.gt, self.lq)
+            # self.camera_id = torch.randint(0, len(self.noise_g), (1,)).item()
+            self.camera_id = ops.randint(0, len(self.noise_g), (1,)).item()
+            # with torch.no_grad():
+            #     scale = self.white_level - self.black_level
+            #     self.gt = (self.gt - self.black_level) / scale
+            #     self.gt, self.lq, self.curr_metadata = self.noise_g(self.gt, scale, self.ratio, self.camera_id)
+            #     if self.augment is not None:
+            #         self.gt, self.lq = self.augment(self.gt, self.lq)
 
         if isinstance(self.net_g, RepNRBase):
             self.output = self.net_g(self.lq, self.camera_id)
@@ -176,8 +184,9 @@ class LEDFinetuneModel(RAWBaseModel):
 
         repnr_opt = opt['repnr_opt']
         self.repnr_opt = deepcopy(repnr_opt)
-        logger = get_root_logger()
-        logger.info(f'Convert {self.net_g._get_name()} into RepNRBase using kwargs:\n{repnr_opt}')
+        logger = get_root_logger() 
+        # logger.info(f'Convert {self.net_g._get_name()} into RepNRBase using kwargs:\n{repnr_opt}')
+        logger.info(f'Convert {self.net_g.__class__.__name__} into RepNRBase using kwargs:\n{repnr_opt}')
         self.net_g = build_repnr_arch_from_base(self.net_g, **repnr_opt)
 
         self.net_g = self.model_to_device(self.net_g)
@@ -212,7 +221,8 @@ class LEDFinetuneModel(RAWBaseModel):
             # define network net_g with Exponential Moving Average (EMA)
             # net_g_ema is used only for testing on one GPU and saving
             # There is no need to wrap with DistributedDataParallel
-            self.net_g_ema = build_network(self.opt['network_g']).to(self.device)
+            # self.net_g_ema = build_network(self.opt['network_g']).to(self.device)
+            self.net_g_ema = build_network(self.opt['network_g'])
             self.net_g_ema = build_repnr_arch_from_base(self.net_g_ema, **deepcopy(self.repnr_opt))
             self.net_g_ema.finetune(aux=self.oomn_iter > 0)
             # load pretrained model
@@ -309,15 +319,24 @@ class LEDFinetuneModel(RAWBaseModel):
     def get_current_learning_rate(self):
         return [param_group['lr'] for param_group in self.cur_optimizer.param_groups]
 
+    # def feed_data(self, data):
+    #     self.lq = data['lq'].to(self.device)
+    #     self.gt = data['gt'].to(self.device)
+    #     self.ccm = data['ccm'].to(self.device)
+    #     self.wb = data['wb'].to(self.device)
+    #     self.ratio = data['ratio'].to(self.device)
+    #     if 'black_level' in data:
+    #         self.black_level = data['black_level'].to(self.device)
+    #         self.white_level = data['white_level'].to(self.device)
     def feed_data(self, data):
-        self.lq = data['lq'].to(self.device)
-        self.gt = data['gt'].to(self.device)
-        self.ccm = data['ccm'].to(self.device)
-        self.wb = data['wb'].to(self.device)
-        self.ratio = data['ratio'].to(self.device)
+        self.lq = data[0]['lq']
+        self.gt = data[0]['gt']
+        self.ccm = data[0]['ccm']
+        self.wb = data[0]['wb']
+        self.ratio = data[0]['ratio']
         if 'black_level' in data:
-            self.black_level = data['black_level'].to(self.device)
-            self.white_level = data['white_level'].to(self.device)
+            self.black_level = data[0]['black_level']
+            self.white_level = data[0]['white_level']
 
     def optimize_parameters(self, current_iter):
         if current_iter == (self.align_iter + 1):
